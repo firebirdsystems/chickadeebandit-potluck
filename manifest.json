@@ -16,6 +16,7 @@
     "requires_approval": false
   },
   "storage": "db",
+  "db_plaintext_columns": ["capacity", "note"],
   "row_policies": {
     "events": {
       "kind": "adult_writable"
@@ -24,14 +25,23 @@
       "kind": "adult_writable"
     },
     "claims": {
-      "kind": "owner_only",
-      "member_column": "member_id",
-      "adults_bypass": true,
-      "unique_per_member": {
-        "member_column": "member_id",
-        "scope_columns": ["event_id", "slot_id"]
-      }
+      "kind": "endpoint_only",
+      "read": "everyone"
     }
+  },
+  "slot_claims": {
+    "slot_table": "slots",
+    "slot_id_column": "id",
+    "capacity_column": "capacity",
+    "claims_table": "claims",
+    "claim_id_column": "id",
+    "slot_fk_column": "slot_id",
+    "member_column": "member_id",
+    "created_at_column": "claimed_at",
+    "one_claim_per_member": true,
+    "allow_release": true,
+    "allowed_columns": ["note"],
+    "max_text_lengths": { "note": 200 }
   },
   "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released"],
   "nav": { "label": "Potluck" },

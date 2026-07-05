@@ -145,6 +145,9 @@ import { esc, isAdult, memberColor, initial, hubConfirm } from "/hub-sdk.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
 const DB = window.__DB_URL ?? "";
+const CLAIM_URL = window.__CLAIM_URL ?? "";
+const RELEASE_URL = window.__RELEASE_URL ?? "";
+const SWAP_URL = window.__SWAP_URL ?? "";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
 
 let members = [];
@@ -236,7 +239,9 @@ async function loadData() {
   ]);
   events = eventRows.rows.map(e => ({ ...e, archived: !!e.archived }));
   slots = slotRows.rows;
-  claims = claimRows.rows;
+  // claims no longer store event_id — derive it from the slot they reference.
+  const slotEvent = new Map(slots.map(s => [s.id, s.event_id]));
+  claims = claimRows.rows.map(c => ({ ...c, event_id: slotEvent.get(c.slot_id) ?? null }));
 }
 
 async function refresh() {
@@ -298,6 +303,12 @@ async function createEvent(form) {
   }
 }
 
+// Capacity is a cross-row invariant a row policy cannot enforce, so claims go
+// through the trusted slot_claims hub endpoints. The endpoint runs one atomic
+// conditional insert (slot exists, is open, capacity remains, not already
+// claimed), stamps id/member_id/claimed_at server-side, and returns 409 with a
+// reason when the guarded insert does not happen. A raw /api/db INSERT can't
+// bypass it: the claims table is endpoint_only.
 async function claimSlot(slotId) {
   const slot = slots.find(s => s.id === slotId);
   if (!slot || !currentMember) return false;
@@ -305,21 +316,22 @@ async function claimSlot(slotId) {
   if (claimedCount(slotId) >= Number(slot.capacity)) { showError("That slot is already full."); return false; }
   const claim = {
     id: uid("claim"), event_id: slot.event_id, slot_id: slot.id,
-    member_id: currentMember.id, member_name: currentMember.name, note: "", claimed_at: nowIso(),
+    member_id: currentMember.id, note: "", claimed_at: nowIso(),
   };
   try {
-    if (DB) {
-      const result = await dbq(
-        `INSERT INTO app_potluck__claims (id, event_id, slot_id, member_id, member_name, note, claimed_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?
-         WHERE (SELECT COUNT(*) FROM app_potluck__claims WHERE slot_id = ?) <
-               (SELECT capacity FROM app_potluck__slots WHERE id = ?)
-           AND NOT EXISTS (
-             SELECT 1 FROM app_potluck__claims WHERE slot_id = ? AND member_id = ?
-           )`,
-        [claim.id, claim.event_id, claim.slot_id, claim.member_id, claim.member_name, claim.note, claim.claimed_at, slot.id, slot.id, slot.id, currentMember.id]
-      );
-      if (result.meta?.changes === 0) throw new Error("Someone just claimed the last opening. Refreshing the list.");
+    if (CLAIM_URL) {
+      const res = await fetch(CLAIM_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slot_id: slot.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) {
+        await loadData().catch(() => {});
+        showError(claimErrorMessage(json));
+        return false;
+      }
+      if (json.claim_id) claim.id = json.claim_id;
     }
     claims = [...claims, claim];
     showNotice(`Claimed ${slot.name}.`);
@@ -331,13 +343,30 @@ async function claimSlot(slotId) {
   }
 }
 
+function claimErrorMessage(json) {
+  switch (json?.reason) {
+    case "slot_full": return "Someone just claimed the last opening.";
+    case "already_claimed": return "You already claimed this slot.";
+    case "slot_closed": return "That slot is no longer open.";
+    default: return json?.error || "Could not claim that slot.";
+  }
+}
+
 async function releaseClaim(claimId) {
   const claim = claims.find(c => c.id === claimId);
   if (!claim) return false;
-  const allowed = claim.member_id === currentMember?.id || canCreate();
-  if (!allowed) { showError("You can only release your own claim."); return false; }
+  // The release endpoint only deletes the caller's own claim on a slot.
+  if (claim.member_id !== currentMember?.id) { showError("You can only release your own claim."); return false; }
   try {
-    if (DB) await dbq("DELETE FROM app_potluck__claims WHERE id = ?", [claimId]);
+    if (RELEASE_URL) {
+      const res = await fetch(RELEASE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slot_id: claim.slot_id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) { showError(json.error || "Could not release that dish."); return false; }
+    }
     claims = claims.filter(c => c.id !== claimId);
     showNotice("Dish released.");
     return true;
@@ -352,11 +381,33 @@ async function swapTo(slotId) {
   const own = claims.find(c => c.event_id === eventId && c.member_id === currentMember?.id);
   if (!own) return claimSlot(slotId);
   if (own.slot_id === slotId) return;
+  const dest = slots.find(s => s.id === slotId);
+  if (dest && claimedCount(slotId) >= Number(dest.capacity)) { showError("That slot is already full."); return; }
   const ok = await hubConfirm("Move your claim to this dish slot?");
   if (!ok) return;
-  const oldClaimId = own.id;
-  const claimedNewSlot = await claimSlot(slotId);
-  if (claimedNewSlot) await releaseClaim(oldClaimId);
+  try {
+    if (SWAP_URL) {
+      const res = await fetch(SWAP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_slot_id: own.slot_id, to_slot_id: slotId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) {
+        await loadData().catch(() => {});
+        showError(claimErrorMessage(json));
+        return;
+      }
+      if (json.claim_id) own.id = json.claim_id;
+    }
+    own.slot_id = slotId;
+    claims = [...claims];
+    showNotice("Claim moved.");
+    render();
+  } catch (e) {
+    await loadData().catch(() => {});
+    showError(e.message);
+  }
 }
 
 async function archiveEvent(eventId) {
@@ -489,11 +540,12 @@ function renderSlot(slot) {
 
 function renderClaim(claim) {
   const member = memberById(claim.member_id);
+  const name = member?.name ?? claim.member_name ?? "Someone";
   const color = memberColor(member?.id ?? claim.member_id);
   return `
     <span class="claim-chip">
-      <span class="avatar" style="background:${esc(color)}">${esc(initial(claim.member_name))}</span>
-      ${esc(claim.member_name)}
+      <span class="avatar" style="background:${esc(color)}">${esc(initial(name))}</span>
+      ${esc(name)}
     </span>
   `;
 }
