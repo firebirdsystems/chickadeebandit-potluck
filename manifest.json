@@ -9,7 +9,7 @@
   "tags": ["food", "events", "potluck", "slot-claims"],
   "data_access": {
     "reads": ["family.members"],
-    "writes": ["family.members"]
+    "writes": []
   },
   "permissions": {
     "default_audience": "everyone",
