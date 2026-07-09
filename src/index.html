@@ -141,7 +141,7 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, memberColor, initial, hubConfirm } from "/hub-sdk.js";
+import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper } from "/hub-sdk.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
 const DB = window.__DB_URL ?? "";
@@ -149,6 +149,7 @@ const CLAIM_URL = window.__CLAIM_URL ?? "";
 const RELEASE_URL = window.__RELEASE_URL ?? "";
 const SWAP_URL = window.__SWAP_URL ?? "";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
+const share = createShareHelper(window.__SHARE_CREATE_URL, window.__SHARE_REVOKE_URL, window.__SHARE_LIST_URL);
 
 let members = [];
 let currentMember = null;
@@ -501,6 +502,7 @@ function renderDetail() {
         </div>
         <div class="event-tools">
           <span class="pill ${totals.claimed >= totals.capacity ? "good" : "info"}">${totals.claimed}/${totals.capacity} spots</span>
+          ${share.enabled && canCreate() && !event.archived ? `<button class="btn btn-ghost btn-sm" data-share="${esc(event.id)}">🔗 Share</button>` : ""}
           ${canCreate() ? `<button class="btn btn-quiet-danger" data-archive="${esc(event.id)}">Archive</button>` : ""}
         </div>
       </div>
@@ -600,6 +602,108 @@ function render() {
   root.innerHTML = selectedEventId ? renderDetail() : view === "create" ? renderCreate() : renderList();
 }
 
+// ─── Share links ──────────────────────────────────────────────────────────────
+let shareModalEl = null;
+let _shareLinks = [];       // last-fetched links, for copy-by-id lookups
+let _shareEntitled = false; // premium `sharing` capability
+
+function closeShareModal() { shareModalEl?.remove(); shareModalEl = null; }
+
+function openShareBackdrop(html) {
+  closeShareModal();
+  shareModalEl = document.createElement("div");
+  shareModalEl.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:16px;z-index:1000";
+  shareModalEl.innerHTML = `<div style="background:var(--hub-surface,#fff);color:var(--hub-text,#111);border-radius:var(--hub-radius,12px);max-width:520px;width:100%;padding:20px;max-height:90vh;overflow:auto">${html}</div>`;
+  shareModalEl.addEventListener("click", (e) => { if (e.target === shareModalEl) closeShareModal(); });
+  document.body.appendChild(shareModalEl);
+}
+
+async function openShareModal(eventId) {
+  const event = events.find(e => e.id === eventId);
+  if (!event) return;
+  const status = await share.status();
+  _shareLinks = status.links;
+  _shareEntitled = status.entitled;
+  const active = _shareLinks.filter(l =>
+    l.itemId === eventId && !l.revokedAt && new Date(l.expiresAt) > new Date());
+
+  const rows = active.map(l => `
+    <div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--hub-border,#e5e7eb)">
+      <div style="flex:1;min-width:0">
+        <input readonly value="${esc(l.url)}" onclick="this.select()"
+          style="width:100%;font-size:.8rem;padding:4px 6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb)" />
+        <div style="font-size:.75rem;color:var(--hub-text-muted,#6b7280);margin-top:3px">
+          Expires ${new Date(l.expiresAt).toLocaleDateString()} · ${l.viewCount} view${l.viewCount === 1 ? "" : "s"}${
+            l.writable ? ` · ${l.submissionCount} sign-up${l.submissionCount === 1 ? "" : "s"} · ✍️ collects sign-ups` : ""}${
+            l.hasPassword ? " · 🔒 password" : ""}
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-share-copy="${esc(l.id)}">Copy</button>
+      <button class="btn btn-danger btn-sm" data-share-revoke="${esc(l.id)}" data-event-id="${esc(eventId)}">Revoke</button>
+    </div>`).join("");
+
+  // Premium (`sharing`) controls: writable guest sign-ups, password, long expiry.
+  // Shown only to entitled households; no in-app upsell for now.
+  const premiumControls = _shareEntitled ? `
+    <label style="display:flex;gap:6px;align-items:center;font-size:.85rem;margin-top:10px">
+      <input type="checkbox" id="share-writable" /> Let guests sign up to bring a dish
+    </label>
+    <input id="share-password" type="text" placeholder="Optional password (min 4 chars)" autocomplete="off"
+      style="width:100%;margin-top:8px;padding:6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb);font-size:.85rem" />
+  ` : "";
+
+  openShareBackdrop(`
+    <h2 style="margin:0 0 4px">Share "${esc(event.title)}"</h2>
+    <p style="font-size:.85rem;color:var(--hub-text-muted,#6b7280);margin:0 0 10px">
+      Anyone with the link can view the potluck and what guests are bringing — no account needed. Links expire automatically.
+    </p>
+    ${rows || `<p style="font-size:.85rem;color:var(--hub-text-muted,#6b7280);padding:8px 0">No active links yet.</p>`}
+    ${premiumControls}
+    <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
+      <select id="share-expiry" style="padding:6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb);font-size:.85rem">
+        <option value="24">1 day</option>
+        <option value="168" selected>7 days</option>
+        <option value="720">30 days</option>
+        ${_shareEntitled ? `<option value="8760">1 year</option>` : ""}
+      </select>
+      <button class="btn" data-share-create="${esc(eventId)}">Create link</button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-ghost" data-share-close>Close</button>
+    </div>
+  `);
+}
+
+async function createShare(eventId) {
+  const event = events.find(e => e.id === eventId);
+  const hours = Number(document.getElementById("share-expiry")?.value) || undefined;
+  const writable = !!document.getElementById("share-writable")?.checked;
+  const password = document.getElementById("share-password")?.value?.trim() || undefined;
+  const btn = shareModalEl?.querySelector("[data-share-create]");
+  if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
+  try {
+    const link = await share.create("event", eventId, { expiresInHours: hours, label: event?.title, writable, password });
+    try { await navigator.clipboard.writeText(link.url); } catch { /* re-render shows the url to copy */ }
+    await openShareModal(eventId);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = "Create link"; }
+    hubAlert("Couldn't create share link", { description: err.message });
+  }
+}
+
+async function copyShare(id) {
+  const link = _shareLinks.find(l => l.id === id);
+  if (!link) return;
+  try { await navigator.clipboard.writeText(link.url); }
+  catch { hubAlert("Couldn't copy — select the link text and copy it manually."); }
+}
+
+async function revokeShareLink(id, eventId) {
+  if (!await hubConfirm("Revoke this share link?", { description: "Anyone using it will immediately lose access.", confirmLabel: "Revoke" })) return;
+  try { await share.revoke(id); await openShareModal(eventId); }
+  catch (err) { hubAlert("Couldn't revoke share link", { description: err.message }); }
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target.closest("button, [data-open-event]");
   if (!target) return;
@@ -614,6 +718,11 @@ document.addEventListener("click", (event) => {
   if (target.hasAttribute("data-swap")) { swapTo(target.getAttribute("data-swap")); return; }
   if (target.hasAttribute("data-release")) { releaseClaim(target.getAttribute("data-release")); return; }
   if (target.hasAttribute("data-archive")) { archiveEvent(target.getAttribute("data-archive")); return; }
+  if (target.hasAttribute("data-share")) { openShareModal(target.getAttribute("data-share")); return; }
+  if (target.hasAttribute("data-share-create")) { createShare(target.getAttribute("data-share-create")); return; }
+  if (target.hasAttribute("data-share-copy")) { copyShare(target.getAttribute("data-share-copy")); return; }
+  if (target.hasAttribute("data-share-revoke")) { revokeShareLink(target.getAttribute("data-share-revoke"), target.getAttribute("data-event-id")); return; }
+  if (target.hasAttribute("data-share-close")) { closeShareModal(); return; }
 });
 
 document.addEventListener("input", (event) => {

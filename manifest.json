@@ -16,7 +16,34 @@
     "requires_approval": false
   },
   "storage": "db",
-  "db_plaintext_columns": ["capacity", "note"],
+  "db_plaintext_columns": ["capacity", "note", "archived", "guest_name", "dish"],
+  "shareable": {
+    "event": {
+      "table": "events",
+      "title_column": "title",
+      "columns": [
+        { "column": "date", "label": "When", "format": "date" },
+        { "column": "location", "label": "Where" },
+        { "column": "notes", "label": "Details", "format": "multiline" }
+      ],
+      "visible_where": { "column": "archived", "values": ["0"] },
+      "aggregates": [
+        { "label": "Dishes signed up", "table": "guest_signups", "fk_column": "event_id", "op": "count" },
+        { "label": "What guests are bringing", "table": "guest_signups", "fk_column": "event_id", "op": "list", "value_column": "dish" }
+      ],
+      "submit": {
+        "table": "guest_signups",
+        "fk_column": "event_id",
+        "fields": [
+          { "column": "guest_name", "label": "Your name", "type": "text", "required": true, "max_length": 80 },
+          { "column": "dish", "label": "What will you bring?", "type": "text", "required": true, "max_length": 120 },
+          { "column": "category", "label": "Category", "type": "select", "required": false, "values": ["Main", "Side", "Dessert", "Drink", "Other"] }
+        ],
+        "max_submissions": 200,
+        "event": "potluck.signup_submitted"
+      }
+    }
+  },
   "row_policies": {
     "events": {
       "kind": "adult_writable"
@@ -43,7 +70,7 @@
     "allowed_columns": ["note"],
     "max_text_lengths": { "note": 200 }
   },
-  "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released"],
+  "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released", "potluck.signup_submitted"],
   "nav": { "label": "Potluck" },
   "resource_limits": {
     "max_db_bytes": 52428800
