@@ -142,6 +142,11 @@
 
 <script type="module">
 import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper } from "/hub-sdk.js";
+import {
+  fmtDate, claimErrorMessage,
+  memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
+  claimedCount as claimedCountOf, eventTotals as eventTotalsOf,
+} from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
 const DB = window.__DB_URL ?? "";
@@ -169,24 +174,14 @@ let draftSlots = [
 function nowIso() { return new Date().toISOString(); }
 function uid(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
 function today() { return new Date().toISOString().slice(0, 10); }
-function fmtDate(value) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
-    .format(new Date(`${value}T12:00:00`));
-}
-function memberById(id) { return members.find(m => m.id === id) ?? null; }
+function memberById(id) { return memberByIdOf(members, id); }
 function canCreate() { return isAdult(currentMember); }
 function selectedEvent() { return events.find(e => e.id === selectedEventId) ?? null; }
-function eventSlots(eventId) { return slots.filter(s => s.event_id === eventId).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)); }
-function slotClaims(slotId) { return claims.filter(c => c.slot_id === slotId).sort((a, b) => a.claimed_at.localeCompare(b.claimed_at)); }
+function eventSlots(eventId) { return sortEventSlots(slots, eventId); }
+function slotClaims(slotId) { return sortSlotClaims(claims, slotId); }
 function myClaim(slotId) { return claims.find(c => c.slot_id === slotId && c.member_id === currentMember?.id) ?? null; }
-function claimedCount(slotId) { return slotClaims(slotId).length; }
-function eventTotals(eventId) {
-  const ss = eventSlots(eventId);
-  const capacity = ss.reduce((sum, s) => sum + Number(s.capacity || 0), 0);
-  const claimed = ss.reduce((sum, s) => sum + claimedCount(s.id), 0);
-  return { claimed, capacity, pct: capacity ? Math.min(100, Math.round((claimed / capacity) * 100)) : 0 };
-}
+function claimedCount(slotId) { return claimedCountOf(claims, slotId); }
+function eventTotals(eventId) { return eventTotalsOf(slots, claims, eventId); }
 
 async function dbq(sql, params = []) {
   if (!DB) return { rows: [] };
@@ -341,15 +336,6 @@ async function claimSlot(slotId) {
     await loadData().catch(() => {});
     showError(e.message);
     return false;
-  }
-}
-
-function claimErrorMessage(json) {
-  switch (json?.reason) {
-    case "slot_full": return "Someone just claimed the last opening.";
-    case "already_claimed": return "You already claimed this slot.";
-    case "slot_closed": return "That slot is no longer open.";
-    default: return json?.error || "Could not claim that slot.";
   }
 }
 
