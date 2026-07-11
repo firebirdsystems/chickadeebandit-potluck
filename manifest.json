@@ -54,6 +54,11 @@
     "claims": {
       "kind": "endpoint_only",
       "read": "everyone"
+    },
+    "guest_signups": {
+      "kind": "endpoint_only",
+      "read": "everyone",
+      "max_rows": 200
     }
   },
   "slot_claims": {
