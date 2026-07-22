@@ -1,5 +1,6 @@
 {
   "id": "potluck",
+  "contexts": ["household", "shared_space"],
   "name": "Potluck",
   "version": "1.0.0",
   "description": "Create gatherings with dish slots and let members claim, swap, and release dishes without overbooking a category.",
