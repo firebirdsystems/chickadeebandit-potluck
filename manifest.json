@@ -17,7 +17,7 @@
     "requires_approval": false
   },
   "storage": "db",
-  "db_plaintext_columns": ["capacity", "note", "archived", "guest_name", "dish"],
+  "db_plaintext_columns": ["capacity", "note", "archived", "guest_name", "dish", "date", "name"],
   "shareable": {
     "event": {
       "table": "events",
@@ -47,7 +47,15 @@
   },
   "row_policies": {
     "events": {
-      "kind": "adult_writable"
+      "kind": "adult_writable",
+      "retain_days": {
+        "default": 730,
+        "timestamp_column": "date",
+        "override_key": "potluck_history",
+        "dependent_tables": [
+          { "table": "guest_signups", "foreign_key": "event_id" }
+        ]
+      }
     },
     "slots": {
       "kind": "adult_writable"
@@ -77,6 +85,16 @@
     "max_text_lengths": { "note": 200 }
   },
   "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released", "potluck.signup_submitted"],
+    "member_references": {
+      "events": {
+        "column": "created_by_id",
+        "on_removed": "keep"
+      },
+      "claims": {
+        "column": "member_id",
+        "on_removed": "delete"
+      }
+    },
   "nav": { "label": "Potluck" },
   "resource_limits": {
     "max_db_bytes": 52428800

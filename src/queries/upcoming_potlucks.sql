@@ -9,6 +9,7 @@ SELECT
 FROM app_potluck__events e
 LEFT JOIN app_potluck__slots s ON s.event_id = e.id
 WHERE e.archived = 0
+  AND e.date >= :today
 GROUP BY e.id
 ORDER BY e.date ASC
 LIMIT 200
