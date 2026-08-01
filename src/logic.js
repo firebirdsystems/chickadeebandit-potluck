@@ -42,3 +42,12 @@ export function claimErrorMessage(json) {
     default: return json?.error || "Could not claim that slot.";
   }
 }
+
+/**
+ * Fields the in-app search matches against (see hub-sdk `searchMatch`).
+ * Location and notes count as well as the title — a gathering is
+ * found again by where it was.
+ */
+export function searchableFields(item) {
+  return [item.title, item.location, item.notes, item.created_by_name];
+}

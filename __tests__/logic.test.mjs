@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   fmtDate, claimErrorMessage, memberById,
-  sortEventSlots, sortSlotClaims, claimedCount, eventTotals,
+  sortEventSlots, sortSlotClaims, claimedCount, eventTotals, searchableFields,
 } from "../src/logic.js";
 
 describe("fmtDate", () => {
@@ -71,5 +71,13 @@ describe("claimErrorMessage", () => {
   it("falls back to error text then default", () => {
     expect(claimErrorMessage({ error: "boom" })).toBe("boom");
     expect(claimErrorMessage(null)).toBe("Could not claim that slot.");
+  });
+});
+
+describe("searchableFields", () => {
+  it("matches on where a gathering was, not just its title", () => {
+    const fields = searchableFields({ title: "Summer social", location: "Riverside park", notes: "bring a chair", created_by_name: "Ada" });
+    expect(fields).toContain("Riverside park");
+    expect(fields).toContain("bring a chair");
   });
 });

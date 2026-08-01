@@ -132,6 +132,13 @@
       .slot-row { grid-template-columns: 1fr; }
       .actions .btn { flex: 1; }
     }
+    .search-row { margin-bottom: 12px; }
+    .search-input {
+      width: 100%; border: 1.5px solid var(--border-mid, var(--border, #d1d5db));
+      border-radius: 8px; padding: 9px 11px; font: inherit;
+      background: var(--surface, var(--card, #fff)); color: var(--text, inherit);
+    }
+    .search-input:focus { outline: none; border-color: var(--accent, #6366f1); }
   </style>
   <base href="/run/potluck/">
 </head>
@@ -141,11 +148,11 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper } from "/hub-sdk.js";
+import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch } from "/hub-sdk.js";
 import {
   fmtDate, claimErrorMessage,
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
-  claimedCount as claimedCountOf, eventTotals as eventTotalsOf,
+  claimedCount as claimedCountOf, eventTotals as eventTotalsOf, searchableFields,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -163,6 +170,7 @@ let slots = [];
 let claims = [];
 let selectedEventId = null;
 let view = "upcoming";
+let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
 let notice = "";
 let draftSlots = [
@@ -451,6 +459,21 @@ function renderEventCard(event) {
   `;
 }
 
+function renderEventList() {
+  const visible = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const shown = searchQ ? visible.filter(e => searchMatch(searchQ, searchableFields(e))) : visible;
+  if (shown.length) return shown.map(renderEventCard).join("");
+  if (searchQ) return `<div class="card empty">No potlucks match "${esc(searchQ)}".</div>`;
+  return `<div class="card empty">No potlucks yet.</div>`;
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "search") return;
+  searchQ = e.target.value;
+  const el = document.getElementById("event-list");
+  if (el) el.innerHTML = renderEventList();
+});
+
 function renderList() {
   const visible = [...events].sort((a, b) => a.date.localeCompare(b.date));
   return `
@@ -466,8 +489,9 @@ function renderList() {
       <h2>Gatherings</h2>
       <button class="btn btn-ghost btn-sm" type="button" data-refresh>Refresh</button>
     </div>
-    <section class="stack">
-      ${visible.length ? visible.map(renderEventCard).join("") : `<div class="card empty">No potlucks yet.</div>`}
+    ${visible.length ? `<div class="search-row"><input id="search" class="search-input" type="search" placeholder="Search gatherings…" aria-label="Search gatherings" value="${esc(searchQ)}" /></div>` : ""}
+    <section class="stack" id="event-list">
+      ${renderEventList()}
     </section>
   `;
 }
