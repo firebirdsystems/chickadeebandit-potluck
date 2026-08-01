@@ -96,6 +96,14 @@
       }
     },
   "nav": { "label": "Potluck" },
+  "agenda": {
+    "kind": "meal",
+    "label": "Potluck",
+    "source": {
+      "kind": "sql",
+      "query": "SELECT id AS id, title AS title, NULLIF(location, '') AS subtitle, date AS when_at FROM app_potluck__events WHERE date = :today AND archived = 0 LIMIT 10"
+    }
+  },
   "resource_limits": {
     "max_db_bytes": 52428800
   },
