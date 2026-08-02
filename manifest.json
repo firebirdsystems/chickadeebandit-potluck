@@ -84,7 +84,6 @@
     "allowed_columns": ["note"],
     "max_text_lengths": { "note": 200 }
   },
-  "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released", "potluck.signup_submitted"],
     "member_references": {
       "events": {
         "column": "created_by_id",
@@ -95,6 +94,7 @@
         "on_removed": "delete"
       }
     },
+  "glance": {"source": {"kind": "sql", "query": "SELECT title AS title, NULLIF(location, '') AS subtitle, date AS at FROM app_potluck__events WHERE archived = 0 AND date >= :today ORDER BY date LIMIT 3"}, "display": {"template": "list", "title": "title", "subtitle": "subtitle", "when": "at"}},
   "nav": { "label": "Potluck" },
   "agenda": {
     "kind": "meal",
