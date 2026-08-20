@@ -168,6 +168,7 @@ let currentMember = null;
 let events = [];
 let slots = [];
 let claims = [];
+let guestSignups = [];
 let selectedEventId = null;
 let view = "upcoming";
 let searchQ = "";       // in-app search (see logic.js searchableFields)
@@ -190,6 +191,7 @@ function slotClaims(slotId) { return sortSlotClaims(claims, slotId); }
 function myClaim(slotId) { return claims.find(c => c.slot_id === slotId && c.member_id === currentMember?.id) ?? null; }
 function claimedCount(slotId) { return claimedCountOf(claims, slotId); }
 function eventTotals(eventId) { return eventTotalsOf(slots, claims, eventId); }
+function eventGuestSignups(eventId) { return guestSignups.filter(g => g.event_id === eventId); }
 
 async function dbq(sql, params = []) {
   if (!DB) return { rows: [] };
@@ -232,20 +234,26 @@ async function seedDemo() {
     { id: "slot-desserts", event_id: eventId, name: "Desserts", capacity: 2, sort_order: 2 },
   ];
   claims = [{ id: "claim-1", event_id: eventId, slot_id: "slot-desserts", member_id: "demo-2", member_name: "Jordan", note: "Apple pie", claimed_at: nowIso() }];
+  guestSignups = [{ id: "guest-1", event_id: eventId, guest_name: "Sam (neighbour)", dish: "Cornbread", category: "Side", created_at: nowIso() }];
 }
 
 async function loadData() {
   if (!DB) { await seedDemo(); return; }
-  const [eventRows, slotRows, claimRows] = await Promise.all([
+  const [eventRows, slotRows, claimRows, guestRows] = await Promise.all([
     dbq("SELECT * FROM app_potluck__events WHERE archived = 0 ORDER BY date ASC, created_at ASC"),
     dbq("SELECT * FROM app_potluck__slots ORDER BY sort_order ASC, name ASC"),
     dbq("SELECT * FROM app_potluck__claims ORDER BY claimed_at ASC"),
+    // Same rows, same order the public share feed renders (manifest
+    // shareable.event.feed, order_column created_at / oldest first) so the
+    // household never sees less than a link visitor does.
+    dbq("SELECT * FROM app_potluck__guest_signups ORDER BY created_at ASC"),
   ]);
   events = eventRows.rows.map(e => ({ ...e, archived: !!e.archived }));
   slots = slotRows.rows;
   // claims no longer store event_id — derive it from the slot they reference.
   const slotEvent = new Map(slots.map(s => [s.id, s.event_id]));
   claims = claimRows.rows.map(c => ({ ...c, event_id: slotEvent.get(c.slot_id) ?? null }));
+  guestSignups = guestRows.rows;
 }
 
 async function refresh() {
@@ -523,6 +531,36 @@ function renderDetail() {
       <h2>Dish slots</h2>
       ${eventSlots(event.id).map(renderSlot).join("") || `<div class="empty">No dish slots yet.</div>`}
     </section>
+    ${renderGuestSignups(event)}
+  `;
+}
+
+// Sign-ups that arrived through a writable share link. They carry no member
+// identity and sit outside the slot capacity system, so they are shown as their
+// own list rather than folded into the slots above. Read-only: `guest_signups`
+// is endpoint_only, so nothing in the app may edit or remove these rows.
+function renderGuestSignups(event) {
+  const signups = eventGuestSignups(event.id);
+  if (!signups.length) return "";
+  return `
+    <section class="card">
+      <h2>Guest sign-ups <span class="pill info">${signups.length}</span></h2>
+      <p class="muted tiny">Added from the share link. Everyone with the link can see this list.</p>
+      <div class="claims">
+        ${signups.map(renderGuestSignup).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderGuestSignup(signup) {
+  const name = signup.guest_name || "A guest";
+  return `
+    <span class="claim-chip">
+      <span class="avatar" style="background:var(--hub-border,#e5e7eb)">${esc(initial(name))}</span>
+      ${esc(signup.dish || "a dish")}${signup.category ? ` <span class="muted tiny">(${esc(signup.category)})</span>` : ""}
+      <span class="muted tiny">· ${esc(name)}</span>
+    </span>
   `;
 }
 

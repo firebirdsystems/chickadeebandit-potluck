@@ -2,7 +2,7 @@
   "id": "potluck",
   "contexts": ["household", "shared_space"],
   "name": "Potluck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Create gatherings with dish slots and let members claim, swap, and release dishes without overbooking a category.",
   "entrypoint": "index.html",
   "runtime": "static",
@@ -29,9 +29,22 @@
       ],
       "visible_where": { "column": "archived", "values": ["0"] },
       "aggregates": [
-        { "label": "Dishes signed up", "table": "guest_signups", "fk_column": "event_id", "op": "count" },
-        { "label": "What guests are bringing", "table": "guest_signups", "fk_column": "event_id", "op": "list", "value_column": "dish" }
+        { "label": "Dishes signed up", "table": "guest_signups", "fk_column": "event_id", "op": "count" }
       ],
+      "feed": {
+        "label": "What guests are bringing",
+        "table": "guest_signups",
+        "fk_column": "event_id",
+        "columns": [
+          { "column": "dish", "label": "Dish", "role": "heading" },
+          { "column": "guest_name", "label": "From", "role": "detail" },
+          { "column": "category", "label": "Category", "role": "detail" }
+        ],
+        "order_column": "created_at",
+        "order": "oldest",
+        "max_items": 200,
+        "empty_text": "No dishes yet — sign up below and yours will be the first."
+      },
       "submit": {
         "table": "guest_signups",
         "fk_column": "event_id",
