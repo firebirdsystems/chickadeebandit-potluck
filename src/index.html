@@ -109,6 +109,13 @@
       display: inline-flex; align-items: center; justify-content: center;
       color: white; font-size: .72rem; font-weight: 800; background: #0f766e;
     }
+    .slot-guests {
+      display: grid; gap: 6px; padding: 8px 10px;
+      background: var(--surface-alt, #f8fafc); border: 1px dashed var(--border); border-radius: 10px;
+    }
+    .slot-guest-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .slot-guest-cap { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .slot-guest-cap input { width: 76px; padding: 4px 8px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .form { display: grid; gap: 10px; }
     .field { display: grid; gap: 4px; }
@@ -153,6 +160,7 @@ import {
   fmtDate, claimErrorMessage,
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
   claimedCount as claimedCountOf, eventTotals as eventTotalsOf, searchableFields,
+  guestSignupsForSlot, guestCount as guestCountOf, unslottedGuestSignups,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -192,6 +200,8 @@ function myClaim(slotId) { return claims.find(c => c.slot_id === slotId && c.mem
 function claimedCount(slotId) { return claimedCountOf(claims, slotId); }
 function eventTotals(eventId) { return eventTotalsOf(slots, claims, eventId); }
 function eventGuestSignups(eventId) { return guestSignups.filter(g => g.event_id === eventId); }
+function slotGuests(slotId) { return guestSignupsForSlot(guestSignups, slotId); }
+function guestCount(slotId) { return guestCountOf(guestSignups, slotId); }
 
 async function dbq(sql, params = []) {
   if (!DB) return { rows: [] };
@@ -229,12 +239,12 @@ async function seedDemo() {
     created_by_id: "demo-1", created_by_name: "Alex", created_at: nowIso(), archived: 0,
   }];
   slots = [
-    { id: "slot-turkey", event_id: eventId, name: "Turkey", capacity: 1, sort_order: 0 },
-    { id: "slot-sides", event_id: eventId, name: "Sides", capacity: 4, sort_order: 1 },
-    { id: "slot-desserts", event_id: eventId, name: "Desserts", capacity: 2, sort_order: 2 },
+    { id: "slot-turkey", event_id: eventId, name: "Turkey", capacity: 1, guest_capacity: 1, sort_order: 0 },
+    { id: "slot-sides", event_id: eventId, name: "Sides", capacity: 4, guest_capacity: 4, sort_order: 1 },
+    { id: "slot-desserts", event_id: eventId, name: "Desserts", capacity: 2, guest_capacity: 2, sort_order: 2 },
   ];
   claims = [{ id: "claim-1", event_id: eventId, slot_id: "slot-desserts", member_id: "demo-2", member_name: "Jordan", note: "Apple pie", claimed_at: nowIso() }];
-  guestSignups = [{ id: "guest-1", event_id: eventId, guest_name: "Sam (neighbour)", dish: "Cornbread", category: "Side", created_at: nowIso() }];
+  guestSignups = [{ id: "guest-1", event_id: eventId, slot_id: "slot-sides", guest_name: "Sam (neighbour)", dish: "Cornbread", category: "Side", created_at: nowIso() }];
 }
 
 async function loadData() {
@@ -288,7 +298,7 @@ async function createEvent(form) {
     id: uid("potluck"), title, date, location, notes,
     created_by_id: currentMember.id, created_by_name: currentMember.name, created_at: nowIso(), archived: 0,
   };
-  const eventSlotsToInsert = cleanSlots.map(s => ({ ...s, id: uid("slot"), event_id: event.id, created_at: nowIso() }));
+  const eventSlotsToInsert = cleanSlots.map(s => ({ ...s, id: uid("slot"), event_id: event.id, guest_capacity: s.capacity, created_at: nowIso() }));
 
   try {
     if (DB) {
@@ -299,9 +309,13 @@ async function createEvent(form) {
       );
       for (const s of eventSlotsToInsert) {
         await dbq(
-          `INSERT INTO app_potluck__slots (id, event_id, name, capacity, sort_order, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [s.id, s.event_id, s.name, s.capacity, s.sort_order, s.created_at]
+          // guest_capacity mirrors the member allowance at creation — the two
+          // ledgers are separate, so a slot offers the same number of openings
+          // to share-link guests as to members until an organizer retunes it
+          // on the slot card.
+          `INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [s.id, s.event_id, s.name, s.capacity, s.capacity, s.sort_order, s.created_at]
         );
       }
     }
@@ -432,6 +446,25 @@ async function archiveEvent(eventId) {
   }
 }
 
+// The guest allowance the hub enforces on the public form. Nothing else in the
+// app writes it, and the hub fails CLOSED at zero — that is how an organizer
+// closes one slot to share-link guests while members keep claiming it.
+async function setGuestCapacity(slotId, raw) {
+  if (!canCreate()) return;
+  const slot = slots.find(s => s.id === slotId);
+  if (!slot) return;
+  const next = Math.max(0, Math.floor(Number(raw) || 0));
+  if (next === Number(slot.guest_capacity || 0)) return;
+  try {
+    if (DB) await dbq("UPDATE app_potluck__slots SET guest_capacity = ? WHERE id = ?", [next, slotId]);
+    slots = slots.map(s => (s.id === slotId ? { ...s, guest_capacity: next } : s));
+    render();
+  } catch (e) {
+    showError(e.message);
+    render();
+  }
+}
+
 function addDraftSlot() {
   draftSlots.push({ name: "", capacity: 1 });
   render();
@@ -535,17 +568,20 @@ function renderDetail() {
   `;
 }
 
-// Sign-ups that arrived through a writable share link. They carry no member
-// identity and sit outside the slot capacity system, so they are shown as their
-// own list rather than folded into the slots above. Read-only: `guest_signups`
-// is endpoint_only, so nothing in the app may edit or remove these rows.
+// Sign-ups that arrived through a writable share link and named no slot — the
+// public slot field is optional, so an event with no slots still accepts
+// guests, and a slot deleted after the fact leaves its sign-ups here rather
+// than hiding them. Sign-ups that DID name a live slot render on that slot card
+// (renderSlotGuests) instead of being listed twice. Read-only either way:
+// `guest_signups` is endpoint_only, so nothing in the app may edit or remove
+// these rows.
 function renderGuestSignups(event) {
-  const signups = eventGuestSignups(event.id);
+  const signups = unslottedGuestSignups(guestSignups, slots, event.id);
   if (!signups.length) return "";
   return `
     <section class="card">
       <h2>Guest sign-ups <span class="pill info">${signups.length}</span></h2>
-      <p class="muted tiny">Added from the share link. Everyone with the link can see this list.</p>
+      <p class="muted tiny">Added from the share link, without a dish slot. Everyone with the link can see this list.</p>
       <div class="claims">
         ${signups.map(renderGuestSignup).join("")}
       </div>
@@ -583,7 +619,39 @@ function renderSlot(slot) {
       <div class="claims">
         ${sc.length ? sc.map(renderClaim).join("") : `<span class="muted tiny">Open spot</span>`}
       </div>
+      ${renderSlotGuests(slot)}
       <div class="actions">${mine ? claimButton : claimButton.replace("data-claim", hasAnyMine ? "data-swap" : "data-claim")}</div>
+    </div>
+  `;
+}
+
+// The share-link half of a slot. Member claims above, guest sign-ups here: the
+// hub's per-option capacity counts only `guest_signups` rows against
+// `slots.guest_capacity`, so the two tallies are never added together.
+// The rows themselves are read-only — `guest_signups` is endpoint_only, so
+// nothing in the app may edit or remove them. The allowance input writes to
+// `slots` (adult_writable) and is the only control here: it is how an organizer
+// retunes the guest half after creation, and zeroing it closes the slot to
+// guests without touching the member allowance.
+function renderSlotGuests(slot) {
+  const guests = slotGuests(slot.id);
+  const allowance = Number(slot.guest_capacity || 0);
+  const editable = share.enabled && canCreate();
+  if (!guests.length && !editable) return "";
+  const guestFull = allowance > 0 && guests.length >= allowance;
+  return `
+    <div class="slot-guests">
+      <div class="slot-guest-head">
+        <span class="muted tiny">From the shared link</span>
+        <span class="pill ${guestFull ? "good" : "info"}">${guests.length}/${allowance}</span>
+      </div>
+      ${guests.length ? `<div class="claims">${guests.map(renderGuestSignup).join("")}</div>` : ""}
+      ${editable ? `
+        <label class="muted tiny slot-guest-cap">
+          Guest spots
+          <input type="number" min="0" value="${esc(String(allowance))}"
+                 data-guest-cap="${esc(slot.id)}" aria-label="Guest spots for ${esc(slot.name)}" />
+        </label>` : ""}
     </div>
   `;
 }
@@ -777,6 +845,14 @@ document.addEventListener("input", (event) => {
   const input = event.target.closest("[data-draft]");
   if (!input) return;
   updateDraft(Number(input.getAttribute("data-draft")), input.getAttribute("data-field"), input.value);
+});
+
+// "change", not "input" — a re-render on every keystroke would tear the field
+// out from under the cursor, and each edit is one write.
+document.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-guest-cap]");
+  if (!input) return;
+  setGuestCapacity(input.getAttribute("data-guest-cap"), input.value);
 });
 
 document.addEventListener("submit", (event) => {

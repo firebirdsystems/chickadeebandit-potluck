@@ -27,6 +27,30 @@ export function claimedCount(claims, slotId) {
   return sortSlotClaims(claims, slotId).length;
 }
 
+/**
+ * Guest sign-ups that chose a given slot. Share-link rows and member claims are
+ * SEPARATE ledgers — the hub's per-option capacity counts only the submit table
+ * (`guest_signups`), and `slots.guest_capacity` is the allowance it compares
+ * against — so this deliberately never mixes with `sortSlotClaims`.
+ */
+export function guestSignupsForSlot(guestSignups, slotId) {
+  if (!slotId) return [];
+  return guestSignups.filter(g => g.slot_id === slotId);
+}
+
+export function guestCount(guestSignups, slotId) {
+  return guestSignupsForSlot(guestSignups, slotId).length;
+}
+
+/**
+ * Sign-ups that named no slot (the public field is optional, so an event with
+ * no slots still accepts guests) or one that has since been deleted.
+ */
+export function unslottedGuestSignups(guestSignups, slots, eventId) {
+  const ids = new Set(slots.filter(s => s.event_id === eventId).map(s => s.id));
+  return guestSignups.filter(g => g.event_id === eventId && !ids.has(g.slot_id));
+}
+
 export function eventTotals(slots, claims, eventId) {
   const ss = sortEventSlots(slots, eventId);
   const capacity = ss.reduce((sum, s) => sum + Number(s.capacity || 0), 0);

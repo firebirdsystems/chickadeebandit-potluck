@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   fmtDate, claimErrorMessage, memberById,
   sortEventSlots, sortSlotClaims, claimedCount, eventTotals, searchableFields,
+  guestSignupsForSlot, guestCount, unslottedGuestSignups,
 } from "../src/logic.js";
 
 describe("fmtDate", () => {
@@ -79,5 +80,41 @@ describe("searchableFields", () => {
     const fields = searchableFields({ title: "Summer social", location: "Riverside park", notes: "bring a chair", created_by_name: "Ada" });
     expect(fields).toContain("Riverside park");
     expect(fields).toContain("bring a chair");
+  });
+});
+
+describe("the guest ledger", () => {
+  const slots = [
+    { id: "s1", event_id: "e1", name: "Sides", capacity: 2, guest_capacity: 2, sort_order: 0 },
+    { id: "s2", event_id: "e1", name: "Desserts", capacity: 1, guest_capacity: 0, sort_order: 1 },
+  ];
+  const guests = [
+    { id: "g1", event_id: "e1", slot_id: "s1", guest_name: "Sam", dish: "Cornbread" },
+    { id: "g2", event_id: "e1", slot_id: "", guest_name: "Ada", dish: "Punch" },
+    { id: "g3", event_id: "e1", slot_id: "gone", guest_name: "Rae", dish: "Rolls" },
+    { id: "g4", event_id: "e2", slot_id: "s9", guest_name: "Other event", dish: "Ignored" },
+  ];
+
+  it("groups sign-ups by the slot the visitor picked", () => {
+    expect(guestSignupsForSlot(guests, "s1").map(g => g.id)).toEqual(["g1"]);
+    expect(guestCount(guests, "s1")).toBe(1);
+    expect(guestCount(guests, "s2")).toBe(0);
+  });
+
+  it("never treats the empty slot_id as a slot", () => {
+    // The public field is optional, so unslotted rows store "". Matching on it
+    // would sweep every one of them onto whichever slot asked first.
+    expect(guestSignupsForSlot(guests, "")).toEqual([]);
+    expect(guestSignupsForSlot(guests, null)).toEqual([]);
+  });
+
+  it("surfaces sign-ups with no slot, or a slot since deleted", () => {
+    // Both must stay visible to the household — a deleted slot must not take
+    // its guests' dishes down with it.
+    expect(unslottedGuestSignups(guests, slots, "e1").map(g => g.id)).toEqual(["g2", "g3"]);
+  });
+
+  it("scopes to one event", () => {
+    expect(unslottedGuestSignups(guests, slots, "e1").some(g => g.id === "g4")).toBe(false);
   });
 });

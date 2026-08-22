@@ -2,7 +2,7 @@
   "id": "potluck",
   "contexts": ["household", "shared_space"],
   "name": "Potluck",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Create gatherings with dish slots and let members claim, swap, and release dishes without overbooking a category.",
   "entrypoint": "index.html",
   "runtime": "static",
@@ -17,7 +17,7 @@
     "requires_approval": false
   },
   "storage": "db",
-  "db_plaintext_columns": ["capacity", "note", "archived", "guest_name", "dish", "date", "name"],
+  "db_plaintext_columns": ["capacity", "guest_capacity", "note", "archived", "guest_name", "dish", "date", "name"],
   "shareable": {
     "event": {
       "table": "events",
@@ -51,7 +51,20 @@
         "fields": [
           { "column": "guest_name", "label": "Your name", "type": "text", "required": true, "max_length": 80 },
           { "column": "dish", "label": "What will you bring?", "type": "text", "required": true, "max_length": 120 },
-          { "column": "category", "label": "Category", "type": "select", "required": false, "values": ["Main", "Side", "Dessert", "Drink", "Other"] }
+          { "column": "category", "label": "Category", "type": "select", "required": false, "values": ["Main", "Side", "Dessert", "Drink", "Other"] },
+          {
+            "column": "slot_id",
+            "label": "Which dish slot?",
+            "type": "select",
+            "required": false,
+            "values_from": {
+              "table": "slots",
+              "fk_column": "event_id",
+              "id_column": "id",
+              "label_column": "name",
+              "capacity_column": "guest_capacity"
+            }
+          }
         ],
         "max_submissions": 200,
         "event": "potluck.signup_submitted"
