@@ -168,6 +168,7 @@ const DB = window.__DB_URL ?? "";
 const CLAIM_URL = window.__CLAIM_URL ?? "";
 const RELEASE_URL = window.__RELEASE_URL ?? "";
 const SWAP_URL = window.__SWAP_URL ?? "";
+const EVENTS_URL = window.__EVENTS_URL ?? "/api/events";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
 const share = createShareHelper(window.__SHARE_CREATE_URL, window.__SHARE_REVOKE_URL, window.__SHARE_LIST_URL);
 
@@ -213,6 +214,18 @@ async function dbq(sql, params = []) {
   const json = await res.json();
   if (json.error) throw new Error(json.error);
   return json;
+}
+
+// Fire-and-forget: a potluck action must not fail because the bus did. Guest
+// signups are NOT published here — the hub emits potluck.signup_submitted
+// itself from the share-link submit path.
+async function publishEvent(type, subjectId, payload = {}) {
+  if (!EVENTS_URL) return;
+  await fetch(EVENTS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, subject_id: subjectId, payload }),
+  }).catch(() => {});
 }
 
 async function loadMembers() {
@@ -321,6 +334,7 @@ async function createEvent(form) {
     }
     events = [...events, event].sort((a, b) => a.date.localeCompare(b.date));
     slots = [...slots, ...eventSlotsToInsert];
+    await publishEvent("potluck.event_created", event.id, { event_id: event.id, title: event.title });
     selectedEventId = event.id;
     view = "upcoming";
     showNotice("Potluck created.");
@@ -360,6 +374,7 @@ async function claimSlot(slotId) {
       if (json.claim_id) claim.id = json.claim_id;
     }
     claims = [...claims, claim];
+    await publishEvent("potluck.slot_claimed", slot.id, { slot_id: slot.id, member_id: currentMember.id });
     showNotice(`Claimed ${slot.name}.`);
     return true;
   } catch (e) {
@@ -385,6 +400,7 @@ async function releaseClaim(claimId) {
       if (!res.ok || json.error) { showError(json.error || "Could not release that dish."); return false; }
     }
     claims = claims.filter(c => c.id !== claimId);
+    await publishEvent("potluck.slot_released", claim.slot_id, { slot_id: claim.slot_id, member_id: claim.member_id });
     showNotice("Dish released.");
     return true;
   } catch (e) {
@@ -417,8 +433,14 @@ async function swapTo(slotId) {
       }
       if (json.claim_id) own.id = json.claim_id;
     }
+    // A swap is one atomic hub call, but on the bus it is exactly what it does:
+    // the old slot frees up and the new one fills. A consumer counting open
+    // capacity would drift if only the claim were announced.
+    const fromSlotId = own.slot_id;
     own.slot_id = slotId;
     claims = [...claims];
+    await publishEvent("potluck.slot_released", fromSlotId, { slot_id: fromSlotId, member_id: own.member_id });
+    await publishEvent("potluck.slot_claimed", slotId, { slot_id: slotId, member_id: own.member_id });
     showNotice("Claim moved.");
     render();
   } catch (e) {
