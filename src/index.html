@@ -155,7 +155,7 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch } from "/hub-sdk.js";
+import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch, hubToday as today } from "/hub-sdk.js";
 import {
   fmtDate, claimErrorMessage,
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
@@ -191,7 +191,6 @@ let draftSlots = [
 
 function nowIso() { return new Date().toISOString(); }
 function uid(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
-function today() { return new Date().toISOString().slice(0, 10); }
 function memberById(id) { return memberByIdOf(members, id); }
 function canCreate() { return isAdult(currentMember); }
 function selectedEvent() { return events.find(e => e.id === selectedEventId) ?? null; }
