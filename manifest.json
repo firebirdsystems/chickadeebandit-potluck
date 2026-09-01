@@ -19,7 +19,7 @@
   "storage": "db",
   "preload": {
     "events": {"sql": "SELECT * FROM app_potluck__events WHERE archived = 0 ORDER BY date ASC, created_at ASC"},
-    "slots": {"sql": "SELECT * FROM app_potluck__slots ORDER BY sort_order ASC, name ASC"}
+    "slots": {"sql": "SELECT s.* FROM app_potluck__slots s JOIN app_potluck__events e ON e.id = s.event_id AND e.archived = 0 ORDER BY s.sort_order ASC, s.name ASC"}
   },
   "db_plaintext_columns": ["capacity", "guest_capacity", "note", "archived", "guest_name", "dish", "date", "name"],
   "shareable": {

@@ -263,7 +263,7 @@ async function loadData() {
   if (!DB) { await seedDemo(); return; }
   const [eventRows, slotRows, claimRows, guestRows] = await Promise.all([
     dbq("SELECT * FROM app_potluck__events WHERE archived = 0 ORDER BY date ASC, created_at ASC"),
-    dbq("SELECT * FROM app_potluck__slots ORDER BY sort_order ASC, name ASC"),
+    dbq("SELECT s.* FROM app_potluck__slots s JOIN app_potluck__events e ON e.id = s.event_id AND e.archived = 0 ORDER BY s.sort_order ASC, s.name ASC"),
     dbq("SELECT * FROM app_potluck__claims ORDER BY claimed_at ASC"),
     // Same rows, same order the public share feed renders (manifest
     // shareable.event.feed, order_column created_at / oldest first) so the
