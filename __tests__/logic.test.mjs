@@ -3,6 +3,7 @@ import {
   fmtDate, claimErrorMessage, memberById,
   sortEventSlots, sortSlotClaims, claimedCount, eventTotals, searchableFields,
   guestSignupsForSlot, guestCount, unslottedGuestSignups,
+  buildCalendarEvents, CALENDAR_EXPORT_MAX_EVENTS,
 } from "../src/logic.js";
 
 describe("fmtDate", () => {
@@ -116,5 +117,87 @@ describe("the guest ledger", () => {
 
   it("scopes to one event", () => {
     expect(unslottedGuestSignups(guests, slots, "e1").some(g => g.id === "g4")).toBe(false);
+  });
+});
+
+describe("buildCalendarEvents", () => {
+  const FROM = new Date(2026, 8, 7);          // 2026-09-07, local
+  const TODAY = "2026-09-07";
+  const build = events => buildCalendarEvents(events, TODAY, FROM);
+
+  it("emits an all-day entry the hub can parse", () => {
+    const [ev] = build([
+      { id: "potluck-1", title: "Thanksgiving Dinner", date: "2026-11-26", location: "Home", notes: "", archived: 0 },
+    ]);
+    expect(ev.id).toBe("potluck-1");
+    expect(ev.title).toBe("Thanksgiving Dinner");
+    expect(ev.description).toBe("Potluck");
+    expect(ev.location).toBe("Home");
+    // The events table has no time column, so start carries no "T" and the hub
+    // derives allDay from that absence on its own.
+    expect(ev.start).toBe("2026-11-26");
+    expect(ev.end).toBe("2026-11-26");
+    expect(ev.all_day).toBe(true);
+    // A gathering is the whole household's, so it concerns nobody in particular.
+    expect(ev.member_ids).toEqual([]);
+    expect(ev.source_label).toBe("Potluck");
+  });
+
+  it("leaves location empty rather than undefined when nobody set one", () => {
+    const [ev] = build([{ id: "p1", title: "Block Party", date: "2026-09-20", archived: 0 }]);
+    expect(ev.location).toBe("");
+  });
+
+  it("drops past gatherings and anything beyond the horizon", () => {
+    const ids = build([
+      { id: "past", title: "Last month", date: "2026-08-30", location: "", archived: 0 },
+      { id: "today", title: "Tonight", date: TODAY, location: "", archived: 0 },
+      { id: "far", title: "Next year", date: "2027-09-08", location: "", archived: 0 },
+    ]).map(e => e.id);
+    expect(ids).toEqual(["today"]);
+  });
+
+  it("skips archived gatherings", () => {
+    // The UI only ever holds unarchived rows, but the export is what the whole
+    // scope reads: an archived potluck must not linger on anyone's calendar.
+    expect(build([
+      { id: "p1", title: "Called off", date: "2026-09-20", location: "", archived: 1 },
+      { id: "p2", title: "Called off too", date: "2026-09-21", location: "", archived: true },
+    ])).toEqual([]);
+  });
+
+  it("never exports a note", () => {
+    const [ev] = build([
+      { id: "p1", title: "Potluck", date: "2026-09-20", location: "Park", notes: "Ask Dana about the divorce", archived: 0 },
+    ]);
+    expect(JSON.stringify(ev)).not.toContain("divorce");
+  });
+
+  it("caps at the hub's own per-app ceiling, so no event is shipped to be dropped", () => {
+    // agenda.ts MAX_CROSS_APP_EVENTS_PER_APP and calendar-feed.ts
+    // MAX_FEED_EVENTS_PER_APP are both 100; exporting more just burns bytes.
+    expect(CALENDAR_EXPORT_MAX_EVENTS).toBe(100);
+  });
+
+  it("caps the payload and keeps the soonest gatherings", () => {
+    const pad = n => String(n).padStart(2, "0");
+    const day = offset => {
+      const d = new Date(2026, 8, 8 + offset);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    // Two a day from 2026-09-08, so all 140 stay inside the 180-day horizon and
+    // the cap, not the horizon, is what does the trimming. Fed in newest-first
+    // to prove the builder sorts before it slices.
+    const events = Array.from({ length: CALENDAR_EXPORT_MAX_EVENTS + 40 }, (_, i) => ({
+      id: `p${i}`,
+      title: `Potluck ${i}`,
+      date: day(Math.floor(i / 2)),
+      location: "",
+      archived: 0,
+    })).reverse();
+    const out = build(events);
+    expect(out).toHaveLength(CALENDAR_EXPORT_MAX_EVENTS);
+    expect(out[0].start).toBe(day(0));
+    expect(out.at(-1).start).toBe(day(49));
   });
 });

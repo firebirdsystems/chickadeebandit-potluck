@@ -75,3 +75,52 @@ export function claimErrorMessage(json) {
 export function searchableFields(item) {
   return [item.title, item.location, item.notes, item.created_by_name];
 }
+
+export const CALENDAR_EXPORT_HORIZON_DAYS = 180;
+export const CALENDAR_EXPORT_MAX_EVENTS = 100;
+
+/** Local YYYY-MM-DD for a Date. */
+function isoDay(d) {
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Build the `calendar_events` payload from upcoming gatherings.
+ *
+ * Shape matches what the hub's cross-app aggregation consumes — see
+ * `normalizeExportedEvent` in packages/hub/src/cloudflare/calendar-feed.ts.
+ * Only the gathering is exported. A slot is a dish role and a claim is who
+ * agreed to fill it: neither is a dated thing, and a household that put
+ * "Desserts" on its calendar beside "Thanksgiving Dinner" would be reading the
+ * sign-up sheet, not its schedule.
+ *
+ * The events table carries a `date` and no time column, so every entry is
+ * all-day and `start` has no `T` in it — the hub derives `allDay` from that
+ * absence on its own.
+ *
+ * `notes` is deliberately NOT exported. This payload reaches the household's
+ * ICS feed, which external calendar services fetch, and a note is free text a
+ * member wrote for the household. Location IS exported: telling you where to
+ * go is what a calendar entry is FOR.
+ */
+export function buildCalendarEvents(events, todayIso, from = new Date()) {
+  // Day arithmetic through the Date constructor rather than milliseconds, so a
+  // DST boundary inside the horizon cannot shift the cutoff by a day.
+  const horizon = isoDay(new Date(from.getFullYear(), from.getMonth(), from.getDate() + CALENDAR_EXPORT_HORIZON_DAYS));
+  return events
+    .filter(e => !Number(e.archived) && e.date >= todayIso && e.date <= horizon)
+    .map(e => ({
+      id: e.id,
+      title: e.title,
+      description: "Potluck",
+      location: e.location || "",
+      start: e.date,
+      end: e.date,
+      all_day: true,
+      member_ids: [],
+      source_label: "Potluck",
+    }))
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .slice(0, CALENDAR_EXPORT_MAX_EVENTS);
+}

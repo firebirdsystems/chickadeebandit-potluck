@@ -16,6 +16,19 @@ describe("manifest.json", () => {
     }
   });
 
+  it("publishes gatherings to the household calendar", () => {
+    // The hub only aggregates an app's calendar_events export when the app
+    // declares it here (collectCrossAppEvents filters on manifest.exports), so
+    // dropping this key silently empties the potlucks off the calendar.
+    expect(manifest.exports).toContain("calendar_events");
+  });
+
+  it("gates the calendar export behind an adult", () => {
+    // Without the ACL any member could POST straight to the calendar_events
+    // store key and rewrite what the household calendar and the ICS feed show.
+    expect(manifest.store_acls?.calendar_events?.write?.require_role).toBe("adult");
+  });
+
   it("entrypoint is index.html", () => expect(manifest.entrypoint).toBe("index.html"));
   it("runtime is static",        () => expect(manifest.runtime).toBe("static"));
 

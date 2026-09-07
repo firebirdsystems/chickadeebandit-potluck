@@ -161,6 +161,7 @@ import {
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
   claimedCount as claimedCountOf, eventTotals as eventTotalsOf, searchableFields,
   guestSignupsForSlot, guestCount as guestCountOf, unslottedGuestSignups,
+  buildCalendarEvents,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -169,6 +170,7 @@ const CLAIM_URL = window.__CLAIM_URL ?? "";
 const RELEASE_URL = window.__RELEASE_URL ?? "";
 const SWAP_URL = window.__SWAP_URL ?? "";
 const EVENTS_URL = window.__EVENTS_URL ?? "/api/events";
+const STORE_URL = window.__STORE_URL ?? "";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
 const share = createShareHelper(window.__SHARE_CREATE_URL, window.__SHARE_REVOKE_URL, window.__SHARE_LIST_URL);
 
@@ -224,6 +226,22 @@ async function publishEvent(type, subjectId, payload = {}) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type, subject_id: subjectId, payload }),
+  }).catch(() => {});
+}
+
+// Republish the `calendar_events` export so upcoming gatherings show up on the
+// household calendar and in the ICS feed. Best-effort and never awaited into a
+// caller's error path: a failed sync must not roll back a potluck the organizer
+// just saved, and the next mutation republishes the whole payload anyway.
+// The store key is adult-gated (manifest store_acls), and every caller below
+// already sits behind canCreate().
+async function syncCalendar() {
+  if (!STORE_URL || !DB) return;
+  const payload = buildCalendarEvents(events, today());
+  await fetch(STORE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "calendar_events", value: JSON.stringify(payload) }),
   }).catch(() => {});
 }
 
@@ -334,6 +352,7 @@ async function createEvent(form) {
     events = [...events, event].sort((a, b) => a.date.localeCompare(b.date));
     slots = [...slots, ...eventSlotsToInsert];
     await publishEvent("potluck.event_created", event.id, { event_id: event.id, title: event.title });
+    await syncCalendar();
     selectedEventId = event.id;
     view = "upcoming";
     showNotice("Potluck created.");
@@ -461,6 +480,7 @@ async function archiveEvent(eventId) {
     if (DB) await dbq("UPDATE app_potluck__events SET archived = 1 WHERE id = ?", [eventId]);
     events = events.filter(e => e.id !== eventId);
     selectedEventId = null;
+    await syncCalendar();
     showNotice("Potluck archived.");
   } catch (e) {
     showError(e.message);
