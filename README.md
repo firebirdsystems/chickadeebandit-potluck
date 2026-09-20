@@ -1,5 +1,7 @@
 # Potluck
 
+A [Chickadee Bandit](https://chickadeebandit.com/app-library/potluck) app.
+
 Dish sign-up for Chickadee Bandit gatherings. Adults create potluck events with capacity-limited dish slots, and members claim, swap, or release dishes without overbooking a category.
 
 ---
