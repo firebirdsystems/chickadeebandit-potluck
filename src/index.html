@@ -155,7 +155,7 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch, hubToday as today } from "/hub-sdk.js";
+import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch, hubToday as today, activeShareLinks, SHARE_EXPIRY_CHOICES, DEFAULT_SHARE_EXPIRY_HOURS } from "/hub-sdk.js";
 import {
   fmtDate, claimErrorMessage,
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
@@ -778,11 +778,10 @@ function openShareBackdrop(html) {
 async function openShareModal(eventId) {
   const event = events.find(e => e.id === eventId);
   if (!event) return;
-  const status = await share.status();
+  const status = await share.listAll();
   _shareLinks = status.links;
   _shareEntitled = status.entitled;
-  const active = _shareLinks.filter(l =>
-    l.itemId === eventId && !l.revokedAt && new Date(l.expiresAt) > new Date());
+  const active = activeShareLinks(_shareLinks, eventId);
 
   const rows = active.map(l => `
     <div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--hub-border,#e5e7eb)">
@@ -818,9 +817,8 @@ async function openShareModal(eventId) {
     ${premiumControls}
     <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
       <select id="share-expiry" style="padding:6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb);font-size:.85rem">
-        <option value="24">1 day</option>
-        <option value="168" selected>7 days</option>
-        <option value="720">30 days</option>
+        ${SHARE_EXPIRY_CHOICES.map(({ hours, label }) =>
+              `<option value="${hours}"${hours === DEFAULT_SHARE_EXPIRY_HOURS ? " selected" : ""}>${label}</option>`).join("")}
         ${_shareEntitled ? `<option value="8760">1 year</option>` : ""}
       </select>
       <button class="btn" data-share-create="${esc(eventId)}">Create link</button>
