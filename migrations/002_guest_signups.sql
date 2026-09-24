@@ -1,5 +1,5 @@
 -- External guest dish sign-ups, submitted through a writable share link
--- (premium `sharing`). Dedicated table — external rows have no member identity,
+-- (the `sharing` capability). Dedicated table — external rows have no member identity,
 -- so they stay out of the member-scoped `claims`/`slots` capacity system.
 --
 -- The hub's share-submit path sets only id, event_id (fk), and the declared

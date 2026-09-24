@@ -762,7 +762,7 @@ function render() {
 // ─── Share links ──────────────────────────────────────────────────────────────
 let shareModalEl = null;
 let _shareLinks = [];       // last-fetched links, for copy-by-id lookups
-let _shareEntitled = false; // premium `sharing` capability
+let _shareEntitled = false; // `sharing` capability
 
 function closeShareModal() { shareModalEl?.remove(); shareModalEl = null; }
 
@@ -798,9 +798,9 @@ async function openShareModal(eventId) {
       <button class="btn btn-danger btn-sm" data-share-revoke="${esc(l.id)}" data-event-id="${esc(eventId)}">Revoke</button>
     </div>`).join("");
 
-  // Premium (`sharing`) controls: writable guest sign-ups, password, long expiry.
+  // `sharing` controls: writable guest sign-ups, password, long expiry.
   // Shown only to entitled households; no in-app upsell for now.
-  const premiumControls = _shareEntitled ? `
+  const sharingControls = _shareEntitled ? `
     <label style="display:flex;gap:6px;align-items:center;font-size:.85rem;margin-top:10px">
       <input type="checkbox" id="share-writable" /> Let guests sign up to bring a dish
     </label>
@@ -814,7 +814,7 @@ async function openShareModal(eventId) {
       Anyone with the link can view the potluck and what guests are bringing — no account needed. Links expire automatically.
     </p>
     ${rows || `<p style="font-size:.85rem;color:var(--hub-text-muted,#6b7280);padding:8px 0">No active links yet.</p>`}
-    ${premiumControls}
+    ${sharingControls}
     <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
       <select id="share-expiry" style="padding:6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb);font-size:.85rem">
         ${SHARE_EXPIRY_CHOICES.map(({ hours, label }) =>
