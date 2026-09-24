@@ -1,0 +1,179 @@
+{
+  "scenarios": [
+    {
+      "name": "dish claims go only through the claim endpoint: everyone reads them, no member can forge or edit one with raw SQL",
+      "members": { "host": "adult", "guest": "adult", "kid": "child" },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__events (id, title, date, created_by_id, created_by_name, created_at) VALUES ('e1', 'Block party', '2026-01-10', ?, 'Host', '2026-01-01T00:00:00Z')",
+          "params": ["{{host}}"]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at) VALUES ('s1', 'e1', 'Dessert', 1, 1, 0, '2026-01-01T00:00:00Z')"
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__claims (id, slot_id, member_id, note, claimed_at) VALUES ('c1', 's1', ?, 'Brownies', '2026-01-02T00:00:00Z')",
+          "params": ["{{host}}"]
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "SELECT id, slot_id FROM app_potluck__claims",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "c1", "slot_id": "s1" }] }
+        },
+        {
+          "action": "db",
+          "as": "guest",
+          "sql": "INSERT INTO app_potluck__claims (id, slot_id, member_id, note, claimed_at) VALUES ('c2', 's1', ?, 'Pie', '2026-01-02T00:00:00Z')",
+          "params": ["{{guest}}"],
+          "expect": { "status": 403, "errorIncludes": "endpoint" }
+        },
+        {
+          "action": "db",
+          "as": "guest",
+          "sql": "UPDATE app_potluck__claims SET member_id = ? WHERE id = 'c1'",
+          "params": ["{{guest}}"],
+          "expect": { "status": 403, "errorIncludes": "endpoint" }
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "DELETE FROM app_potluck__claims WHERE id = 'c1'",
+          "expect": { "status": 403, "errorIncludes": "endpoint" }
+        },
+        {
+          "action": "db",
+          "as": "guest",
+          "sql": "SELECT id FROM app_potluck__claims",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "c1" }] }
+        }
+      ]
+    },
+    {
+      "name": "share-link guest sign-ups are readable by members but no member can write one",
+      "members": { "host": "adult" },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__events (id, title, date, created_by_id, created_by_name, created_at) VALUES ('e1', 'Block party', '2026-01-10', ?, 'Host', '2026-01-01T00:00:00Z')",
+          "params": ["{{host}}"]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__guest_signups (id, event_id, guest_name, dish, category, created_at) VALUES ('g1', 'e1', 'Pat', 'Salad', 'Side', '2026-01-02T00:00:00Z')"
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "SELECT id, dish FROM app_potluck__guest_signups",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "g1", "dish": "Salad" }] }
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "INSERT INTO app_potluck__guest_signups (id, event_id, guest_name, dish, category, created_at) VALUES ('g2', 'e1', 'Fake', 'Nothing', 'Other', '2026-01-02T00:00:00Z')",
+          "expect": { "status": 403, "errorIncludes": "endpoint" }
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "SELECT id FROM app_potluck__guest_signups",
+          "expect": { "status": 200, "rowCount": 1 }
+        }
+      ]
+    },
+    {
+      "name": "only adults create gatherings and dish slots; a child cannot, and a slot needs positive capacity",
+      "members": { "host": "adult", "kid": "child" },
+      "steps": [
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "INSERT INTO app_potluck__events (id, title, date, created_by_id, created_by_name, created_at) VALUES ('e1', 'Thanksgiving', '2026-01-10', ?, 'Host', '2026-01-01T00:00:00Z')",
+          "params": ["{{host}}"],
+          "expect": { "status": 200 }
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at) VALUES ('s1', 'e1', 'Sides', 3, 3, 0, '2026-01-01T00:00:00Z')",
+          "expect": { "status": 200 }
+        },
+        {
+          "action": "db",
+          "as": "host",
+          "sql": "INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at) VALUES ('s0', 'e1', 'Broken', 0, 0, 1, '2026-01-01T00:00:00Z')",
+          "expect": { "status": 400 }
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "INSERT INTO app_potluck__events (id, title, date, created_by_id, created_by_name, created_at) VALUES ('e2', 'Candy party', '2026-01-11', ?, 'Kid', '2026-01-01T00:00:00Z')",
+          "params": ["{{kid}}"],
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at) VALUES ('s2', 'e1', 'Candy', 5, 5, 2, '2026-01-01T00:00:00Z')",
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "UPDATE app_potluck__slots SET capacity = 99 WHERE id = 's1'",
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "SELECT id, capacity FROM app_potluck__slots",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "s1", "capacity": 3 }] }
+        },
+        {
+          "action": "db",
+          "as": "kid",
+          "sql": "SELECT id FROM app_potluck__events",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "e1" }] }
+        }
+      ]
+    },
+    {
+      "name": "upcoming_potlucks lists future, unarchived gatherings with their slot totals; claim_summary lists claims",
+      "members": { "host": "adult" },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__events (id, title, date, created_by_id, created_by_name, created_at, archived) VALUES ('e_future', 'Reunion', '2999-06-01', ?, 'Host', '2026-01-01T00:00:00Z', 0), ('e_past', 'Old party', '2020-06-01', ?, 'Host', '2020-01-01T00:00:00Z', 0), ('e_arch', 'Cancelled', '2999-07-01', ?, 'Host', '2026-01-01T00:00:00Z', 1)",
+          "params": ["{{host}}", "{{host}}", "{{host}}"]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at) VALUES ('s1', 'e_future', 'Mains', 2, 2, 0, '2026-01-01T00:00:00Z'), ('s2', 'e_future', 'Drinks', 3, 3, 1, '2026-01-01T00:00:00Z')"
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_potluck__claims (id, slot_id, member_id, note, claimed_at) VALUES ('c1', 's1', ?, 'Lasagna', '2026-01-02T00:00:00Z')",
+          "params": ["{{host}}"]
+        },
+        {
+          "action": "named",
+          "as": "host",
+          "kind": "query",
+          "name": "upcoming_potlucks",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "e_future", "slot_count": 2, "total_capacity": 5 }] }
+        },
+        {
+          "action": "named",
+          "as": "host",
+          "kind": "query",
+          "name": "claim_summary",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "c1", "slot_id": "s1" }] }
+        }
+      ]
+    }
+  ]
+}
