@@ -124,6 +124,7 @@
         "on_removed": "delete"
       }
     },
+  "alert_on": ["potluck.signup_submitted"],
   "publishes": ["potluck.event_created", "potluck.slot_claimed", "potluck.slot_released"],
   "exports": ["calendar_events"],
   "store_acls": {
