@@ -70,6 +70,7 @@
             }
           }
         ],
+        "until_column": "date",
         "max_submissions": 200,
         "event": "potluck.signup_submitted"
       }

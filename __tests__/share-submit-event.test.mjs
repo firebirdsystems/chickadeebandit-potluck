@@ -66,4 +66,14 @@ describe("share-link guest submissions", () => {
       expect(columns, `${submit.table}.${column}`).toContain(column);
     }
   });
+  // The link stops taking guest sign-ups once the potluck day is over, while
+  // the page stays readable. `date` is a plain date (an <input type="date">),
+  // which the hub reads as the END of that household day — so guests can sign
+  // up all day, and an unset date means no cutoff.
+  it("closes guest sign-ups at the end of the potluck day", () => {
+    expect(submit.until_column).toBe("date");
+    expect(columnsOf(manifest.shareable[itemType].table)).toContain(submit.until_column);
+    expect(manifest.db_plaintext_columns).toContain(submit.until_column);
+    expect(submit.until_grace_minutes).toBeUndefined();
+  });
 });
