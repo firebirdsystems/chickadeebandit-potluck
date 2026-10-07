@@ -155,7 +155,7 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch, hubToday as today, activeShareLinks, SHARE_EXPIRY_CHOICES, DEFAULT_SHARE_EXPIRY_HOURS } from "/hub-sdk.js";
+import { esc, isAdult, memberColor, initial, hubConfirm, hubAlert, createShareHelper, searchMatch, hubToday as today, activeShareLinks, SHARE_EXPIRY_CHOICES, DEFAULT_SHARE_EXPIRY_HOURS, glyph } from "/hub-sdk.js";
 import {
   fmtDate, claimErrorMessage,
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
@@ -594,7 +594,7 @@ function renderDetail() {
         </div>
         <div class="event-tools">
           <span class="pill ${totals.claimed >= totals.capacity ? "good" : "info"}">${totals.claimed}/${totals.capacity} spots</span>
-          ${share.enabled && canCreate() && !event.archived ? `<button class="btn btn-ghost btn-sm" data-share="${esc(event.id)}">🔗 Share</button>` : ""}
+          ${share.enabled && canCreate() && !event.archived ? `<button class="btn btn-ghost btn-sm" data-share="${esc(event.id)}">${glyph("link")} Share</button>` : ""}
           ${canCreate() ? `<button class="btn btn-quiet-danger" data-archive="${esc(event.id)}">Archive</button>` : ""}
         </div>
       </div>
@@ -790,8 +790,8 @@ async function openShareModal(eventId) {
           style="width:100%;font-size:.8rem;padding:4px 6px;border:1px solid var(--hub-border,#e5e7eb);border-radius:6px;background:var(--hub-bg,#f9fafb)" />
         <div style="font-size:.75rem;color:var(--hub-text-muted,#6b7280);margin-top:3px">
           Expires ${new Date(l.expiresAt).toLocaleDateString()} · ${l.viewCount} view${l.viewCount === 1 ? "" : "s"}${
-            l.writable ? ` · ${l.submissionCount} sign-up${l.submissionCount === 1 ? "" : "s"} · ✍️ collects sign-ups` : ""}${
-            l.hasPassword ? " · 🔒 password" : ""}
+            l.writable ? ` · ${l.submissionCount} sign-up${l.submissionCount === 1 ? "" : "s"} · ${glyph("pencil")} collects sign-ups` : ""}${
+            l.hasPassword ? ` · ${glyph("lock")} password` : ""}
         </div>
       </div>
       <button class="btn btn-ghost btn-sm" data-share-copy="${esc(l.id)}">Copy</button>
