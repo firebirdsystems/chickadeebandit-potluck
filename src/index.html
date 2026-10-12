@@ -129,6 +129,8 @@
     .slot-builder { display: grid; gap: 8px; }
     .slot-row { display: grid; grid-template-columns: 1fr 74px auto; gap: 8px; align-items: center; }
     .empty, .loading { color: var(--muted); text-align: center; padding: 32px 16px; }
+    .load-error { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--hub-tint-danger, #fee2e2); color: var(--hub-tint-danger-fg, #b91c1c); font-size: 0.9rem; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+    .load-error-retry { background: none; border: 1px solid currentColor; border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; flex-shrink: 0; }
     .error { background: var(--red-soft); color: var(--red); padding: 9px 12px; border-radius: 8px; margin-bottom: 10px; font-size: .86rem; }
     .notice { background: var(--amber-soft); color: var(--amber); padding: 9px 12px; border-radius: 8px; margin-bottom: 10px; font-size: .86rem; }
     @media (min-width: 700px) {
@@ -185,6 +187,9 @@ let view = "upcoming";
 let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
 let notice = "";
+// Set while the first load has not succeeded: the gatherings are unknown, not empty.
+let loadFailed = false;
+let loadedOnce = false;
 let draftSlots = [
   { name: "Turkey", capacity: 1 },
   { name: "Sides", capacity: 4 },
@@ -212,8 +217,8 @@ async function dbq(sql, params = []) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql, params }),
   });
-  const json = await res.json();
-  if (json.error) throw new Error(json.error);
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || typeof json !== "object" || json.error) throw new Error(json?.error || "Couldn’t reach the hub. Try again.");
   return json;
 }
 
@@ -254,8 +259,13 @@ async function loadMembers() {
       { id: "demo-4", name: "Riley", role: "child" },
     ];
   } else {
+    // A roster that cannot be read is a failed load, not an empty household.
     const res = await fetch(`${CONTEXT}?keys=family.members`);
-    members = ((await res.json())["family.members"]) ?? [];
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || typeof json !== "object") throw new Error("Couldn’t reach the hub. Try again.");
+    // A 200 that names the roster in `$errors` is the hub failing to read it.
+    if (Array.isArray(json.$errors) && json.$errors.includes("family.members")) throw new Error("Couldn’t reach the hub. Try again.");
+    members = json["family.members"] ?? [];
   }
   currentMember = HUB_MEMBER ?? members[0] ?? { id: "guest", name: "Guest", role: "adult" };
 }
@@ -302,9 +312,10 @@ async function refresh() {
     await loadMembers();
     await loadData();
     if (selectedEventId && !events.some(e => e.id === selectedEventId)) selectedEventId = null;
+    loadedOnce = true; loadFailed = false;
     render();
   } catch (e) {
-    error = e.message;
+    if (loadedOnce) error = e.message; else loadFailed = true;
     render();
   }
 }
@@ -383,8 +394,8 @@ async function claimSlot(slotId) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slot_id: slot.id }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) {
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || typeof json !== "object" || json.error) {
         await loadData().catch(() => {});
         showError(claimErrorMessage(json));
         return false;
@@ -414,8 +425,8 @@ async function releaseClaim(claimId) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slot_id: claim.slot_id }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) { showError(json.error || "Could not release that dish."); return false; }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || typeof json !== "object" || json.error) { showError(json.error || "Could not release that dish."); return false; }
     }
     claims = claims.filter(c => c.id !== claimId);
     await publishEvent("potluck.slot_released", claim.slot_id, { slot_id: claim.slot_id, member_id: claim.member_id });
@@ -443,8 +454,8 @@ async function swapTo(slotId) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from_slot_id: own.slot_id, to_slot_id: slotId }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) {
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || typeof json !== "object" || json.error) {
         await loadData().catch(() => {});
         showError(claimErrorMessage(json));
         return;
@@ -557,6 +568,15 @@ document.addEventListener("input", (e) => {
 });
 
 function renderList() {
+  if (loadFailed) return `
+    <div class="topbar">
+      <div>
+        <h1>Potluck</h1>
+        <p class="muted tiny">Claim dishes without double-booking dessert.</p>
+      </div>
+    </div>
+    <div class="load-error" data-testid="load-error" role="alert"><span>Couldn’t load the gatherings.</span> <button type="button" class="load-error-retry" data-testid="load-retry">Try again</button></div>
+  `;
   const visible = [...events].sort((a, b) => a.date.localeCompare(b.date));
   return `
     <div class="topbar">
@@ -756,7 +776,7 @@ function renderCreate() {
 function render() {
   const root = document.getElementById("root");
   root.className = "app";
-  root.innerHTML = selectedEventId ? renderDetail() : view === "create" ? renderCreate() : renderList();
+  root.innerHTML = loadFailed ? renderList() : selectedEventId ? renderDetail() : view === "create" ? renderCreate() : renderList();
 }
 
 // ─── Share links ──────────────────────────────────────────────────────────────
@@ -866,7 +886,7 @@ document.addEventListener("click", (event) => {
   if (openId) { selectedEventId = openId; clearMessages(); render(); return; }
   if (target.matches("[data-back], [data-view-list]")) { selectedEventId = null; view = "upcoming"; clearMessages(); render(); return; }
   if (target.matches("[data-view-create]")) { view = "create"; clearMessages(); render(); return; }
-  if (target.matches("[data-refresh]")) { refresh(); return; }
+  if (target.matches('[data-refresh], [data-testid="load-retry"]')) { refresh(); return; }
   if (target.matches("[data-add-slot]")) { addDraftSlot(); return; }
   if (target.hasAttribute("data-remove-draft")) { removeDraft(Number(target.getAttribute("data-remove-draft"))); return; }
   if (target.hasAttribute("data-claim")) { claimSlot(target.getAttribute("data-claim")); return; }
