@@ -222,6 +222,25 @@ async function dbq(sql, params = []) {
   return json;
 }
 
+// Atomic multi-statement form of /api/db — D1 runs a batch transactionally, so
+// the statements land whole or not at all. /api/db caps a batch at 25
+// statements; creating a potluck is the event row plus one row per dish slot,
+// so the form stops at MAX_SLOTS and the create is always ONE batch.
+const MAX_BATCH = 25;
+const MAX_SLOTS = MAX_BATCH - 1;
+
+async function dbBatch(statements) {
+  if (!DB || !statements.length) return [];
+  const res = await fetch(DB, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ statements }),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || typeof json !== "object" || json.error) throw new Error(json?.error || "Couldn’t reach the hub. Try again.");
+  return json.results ?? [];
+}
+
 // Fire-and-forget: a potluck action must not fail because the bus did. Guest
 // signups are NOT published here — the hub emits potluck.signup_submitted
 // itself from the share-link submit path.
@@ -324,7 +343,14 @@ function clearMessages() { error = ""; notice = ""; }
 function showError(message) { error = message; notice = ""; render(); }
 function showNotice(message) { notice = message; error = ""; render(); }
 
+// What is typed into the create form, kept outside the DOM: every message and
+// every slot change re-renders the form, and a refused save must leave it as typed.
+let draftEvent = null;
+let creating = false;
+function eventDraft() { return draftEvent ??= { title: "Holiday Dinner", date: today(), location: "", notes: "" }; }
+
 async function createEvent(form) {
+  if (creating) return;
   if (!canCreate()) return showError("Only adults and leadership can create potlucks.");
   const title = form.title.value.trim();
   const date = form.date.value;
@@ -334,6 +360,7 @@ async function createEvent(form) {
     .map((s, index) => ({ ...s, name: s.name.trim(), capacity: Math.max(1, Number(s.capacity) || 1), sort_order: index }))
     .filter(s => s.name);
   if (!title || !date || cleanSlots.length === 0) return showError("Add a title, date, and at least one dish slot.");
+  if (cleanSlots.length > MAX_SLOTS) return showError(`A potluck can have up to ${MAX_SLOTS} dish slots.`);
 
   const event = {
     id: uid("potluck"), title, date, location, notes,
@@ -341,24 +368,29 @@ async function createEvent(form) {
   };
   const eventSlotsToInsert = cleanSlots.map(s => ({ ...s, id: uid("slot"), event_id: event.id, guest_capacity: s.capacity, created_at: nowIso() }));
 
+  creating = true;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
   try {
     if (DB) {
-      await dbq(
-        `INSERT INTO app_potluck__events (id, title, date, location, notes, created_by_id, created_by_name, created_at, archived)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-        [event.id, event.title, event.date, event.location, event.notes, event.created_by_id, event.created_by_name, event.created_at]
-      );
-      for (const s of eventSlotsToInsert) {
-        await dbq(
+      // One batch: the event and every slot land together or not at all, so a
+      // refused create leaves nothing behind for the retry to duplicate.
+      await dbBatch([
+        {
+          sql: `INSERT INTO app_potluck__events (id, title, date, location, notes, created_by_id, created_by_name, created_at, archived)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+          params: [event.id, event.title, event.date, event.location, event.notes, event.created_by_id, event.created_by_name, event.created_at],
+        },
+        ...eventSlotsToInsert.map(s => ({
           // guest_capacity mirrors the member allowance at creation — the two
           // ledgers are separate, so a slot offers the same number of openings
           // to share-link guests as to members until an organizer retunes it
           // on the slot card.
-          `INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [s.id, s.event_id, s.name, s.capacity, s.capacity, s.sort_order, s.created_at]
-        );
-      }
+          sql: `INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          params: [s.id, s.event_id, s.name, s.capacity, s.capacity, s.sort_order, s.created_at],
+        })),
+      ]);
     }
     events = [...events, event].sort((a, b) => a.date.localeCompare(b.date));
     slots = [...slots, ...eventSlotsToInsert];
@@ -366,9 +398,15 @@ async function createEvent(form) {
     await syncCalendar();
     selectedEventId = event.id;
     view = "upcoming";
+    draftEvent = null;
     showNotice("Potluck created.");
   } catch (e) {
-    showError(e.message);
+    // Nothing is drawn for a potluck the hub refused; the form re-renders as typed.
+    console.error(e);
+    showError("Couldn’t create the potluck — try again.");
+  } finally {
+    creating = false;
+    if (submitBtn) submitBtn.disabled = false;
   }
 }
 
@@ -407,8 +445,9 @@ async function claimSlot(slotId) {
     showNotice(`Claimed ${slot.name}.`);
     return true;
   } catch (e) {
+    console.error(e);
     await loadData().catch(() => {});
-    showError(e.message);
+    showError("Couldn’t claim that dish — try again.");
     return false;
   }
 }
@@ -433,7 +472,8 @@ async function releaseClaim(claimId) {
     showNotice("Dish released.");
     return true;
   } catch (e) {
-    showError(e.message);
+    console.error(e);
+    showError("Couldn’t release that dish — try again.");
     return false;
   }
 }
@@ -473,8 +513,9 @@ async function swapTo(slotId) {
     showNotice("Claim moved.");
     render();
   } catch (e) {
+    console.error(e);
     await loadData().catch(() => {});
-    showError(e.message);
+    showError("Couldn’t move your claim — try again.");
   }
 }
 
@@ -494,30 +535,37 @@ async function archiveEvent(eventId) {
     await syncCalendar();
     showNotice("Potluck archived.");
   } catch (e) {
-    showError(e.message);
+    console.error(e);
+    showError("Couldn’t archive the potluck — try again.");
   }
 }
 
 // The guest allowance the hub enforces on the public form. Nothing else in the
 // app writes it, and the hub fails CLOSED at zero — that is how an organizer
 // closes one slot to share-link guests while members keep claiming it.
+const guestCapDraft = {}; // slot id → a typed allowance whose save was refused
 async function setGuestCapacity(slotId, raw) {
   if (!canCreate()) return;
   const slot = slots.find(s => s.id === slotId);
   if (!slot) return;
   const next = Math.max(0, Math.floor(Number(raw) || 0));
-  if (next === Number(slot.guest_capacity || 0)) return;
+  if (next === Number(slot.guest_capacity || 0)) { delete guestCapDraft[slotId]; return; }
   try {
     if (DB) await dbq("UPDATE app_potluck__slots SET guest_capacity = ? WHERE id = ?", [next, slotId]);
     slots = slots.map(s => (s.id === slotId ? { ...s, guest_capacity: next } : s));
+    delete guestCapDraft[slotId];
     render();
   } catch (e) {
-    showError(e.message);
-    render();
+    // The field keeps the number that was typed; the pill beside it still
+    // shows the allowance the hub has.
+    console.error(e);
+    guestCapDraft[slotId] = next;
+    showError("Couldn’t save the guest spots — try again.");
   }
 }
 
 function addDraftSlot() {
+  if (draftSlots.length >= MAX_SLOTS) return showError(`A potluck can have up to ${MAX_SLOTS} dish slots.`);
   draftSlots.push({ name: "", capacity: 1 });
   render();
 }
@@ -531,14 +579,14 @@ function removeDraft(index) {
 }
 
 function renderMessages() {
-  return `${error ? `<div class="error">${esc(error)}</div>` : ""}${notice ? `<div class="notice">${esc(notice)}</div>` : ""}`;
+  return `${error ? `<div class="error" data-testid="error">${esc(error)}</div>` : ""}${notice ? `<div class="notice">${esc(notice)}</div>` : ""}`;
 }
 
 function renderEventCard(event) {
   const totals = eventTotals(event.id);
   const statusClass = totals.capacity && totals.claimed >= totals.capacity ? "good" : totals.claimed ? "info" : "warn";
   return `
-    <article class="card event-card" data-open-event="${esc(event.id)}">
+    <article class="card event-card" data-testid="event-card" data-open-event="${esc(event.id)}">
       <div class="event-head">
         <div>
           <div class="event-title">${esc(event.title)}</div>
@@ -584,7 +632,7 @@ function renderList() {
         <h1>Potluck</h1>
         <p class="muted tiny">Claim dishes without double-booking dessert.</p>
       </div>
-      ${canCreate() ? `<button class="btn" data-view-create>Create</button>` : ""}
+      ${canCreate() ? `<button class="btn" data-testid="new-potluck" data-view-create>Create</button>` : ""}
     </div>
     ${renderMessages()}
     <div class="section-head">
@@ -604,7 +652,7 @@ function renderDetail() {
   const totals = eventTotals(event.id);
   const ownClaims = claims.filter(c => c.event_id === event.id && c.member_id === currentMember?.id);
   return `
-    <button class="btn btn-ghost btn-sm back" data-back>Back</button>
+    <button class="btn btn-ghost btn-sm back" data-testid="detail-back" data-back>Back</button>
     ${renderMessages()}
     <section class="card stack">
       <div class="event-head">
@@ -670,7 +718,7 @@ function renderSlot(slot) {
     ? `<button class="btn btn-danger btn-sm" data-release="${esc(mine.id)}">Release</button>`
     : `<button class="btn btn-sm" data-claim="${esc(slot.id)}" ${full ? "disabled" : ""}>${hasAnyMine ? "Swap here" : "Claim"}</button>`;
   return `
-    <div class="slot">
+    <div class="slot" data-testid="slot">
       <div class="slot-top">
         <div>
           <div class="slot-name">${esc(slot.name)}</div>
@@ -710,7 +758,7 @@ function renderSlotGuests(slot) {
       ${editable ? `
         <label class="muted tiny slot-guest-cap">
           Guest spots
-          <input type="number" min="0" value="${esc(String(allowance))}"
+          <input type="number" min="0" value="${esc(String(guestCapDraft[slot.id] ?? allowance))}"
                  data-guest-cap="${esc(slot.id)}" aria-label="Guest spots for ${esc(slot.name)}" />
         </label>` : ""}
     </div>
@@ -738,20 +786,20 @@ function renderCreate() {
       <div class="grid two">
         <div class="field">
           <label for="title">Gathering</label>
-          <input id="title" name="title" value="Holiday Dinner" required />
+          <input id="title" name="title" data-testid="field-title" value="${esc(eventDraft().title)}" required />
         </div>
         <div class="field">
           <label for="date">Date</label>
-          <input id="date" name="date" type="date" value="${today()}" required />
+          <input id="date" name="date" type="date" value="${esc(eventDraft().date)}" required />
         </div>
       </div>
       <div class="field">
         <label for="location">Location</label>
-        <input id="location" name="location" placeholder="Home, clubhouse, chapter hall" />
+        <input id="location" name="location" value="${esc(eventDraft().location)}" placeholder="Home, clubhouse, chapter hall" />
       </div>
       <div class="field">
         <label for="notes">Notes</label>
-        <textarea id="notes" name="notes" placeholder="Theme, headcount, arrival window"></textarea>
+        <textarea id="notes" name="notes" placeholder="Theme, headcount, arrival window">${esc(eventDraft().notes)}</textarea>
       </div>
       <div class="field">
         <label>Dish slots</label>
@@ -766,8 +814,8 @@ function renderCreate() {
         </div>
       </div>
       <div class="actions">
-        <button class="btn btn-ghost" type="button" data-add-slot>Add slot</button>
-        <button class="btn" type="submit">Create potluck</button>
+        <button class="btn btn-ghost" type="button" data-add-slot ${draftSlots.length >= MAX_SLOTS ? "disabled" : ""}>Add slot</button>
+        <button class="btn" type="submit" data-testid="create-submit">Create potluck</button>
       </div>
     </form>
   `;
@@ -901,6 +949,8 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  const field = event.target.closest("#create-form [name]");
+  if (field && field.name in eventDraft()) { eventDraft()[field.name] = field.value; return; }
   const input = event.target.closest("[data-draft]");
   if (!input) return;
   updateDraft(Number(input.getAttribute("data-draft")), input.getAttribute("data-field"), input.value);
@@ -912,6 +962,16 @@ document.addEventListener("change", (event) => {
   const input = event.target.closest("[data-guest-cap]");
   if (!input) return;
   setGuestCapacity(input.getAttribute("data-guest-cap"), input.value);
+});
+
+// A refused allowance stays in its field, where "change" will not fire again
+// for the same number — Enter sends it once more.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const input = event.target.closest?.("[data-guest-cap]");
+  if (!input) return;
+  const slotId = input.getAttribute("data-guest-cap");
+  if (String(guestCapDraft[slotId]) === input.value) setGuestCapacity(slotId, input.value);
 });
 
 document.addEventListener("submit", (event) => {

@@ -1,0 +1,122 @@
+{
+  "scenarios": [
+    {
+      "name": "a refused create leaves no potluck behind, and the retry creates exactly one with all its slots",
+      "members": {
+        "host": "adult"
+      },
+      "steps": [
+        {
+          "action": "open",
+          "as": "host"
+        },
+        {
+          "action": "waitFor",
+          "selector": "[data-testid=\"new-potluck\"]",
+          "as": "host"
+        },
+        {
+          "action": "expectCount",
+          "selector": "[data-testid=\"event-card\"]",
+          "count": 0,
+          "as": "host"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=\"new-potluck\"]",
+          "as": "host"
+        },
+        {
+          "action": "waitFor",
+          "selector": "#create-form",
+          "as": "host"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=\"field-title\"]",
+          "value": "Harvest Supper",
+          "as": "host"
+        },
+        {
+          "action": "fault",
+          "mode": "down",
+          "as": "host"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=\"create-submit\"]",
+          "as": "host"
+        },
+        {
+          "action": "expectText",
+          "selector": "[data-testid=\"error\"]",
+          "text": "Couldn’t create the potluck — try again.",
+          "as": "host"
+        },
+        {
+          "action": "expectVisible",
+          "selector": "[data-testid=\"field-title\"][value=\"Harvest Supper\"]",
+          "as": "host"
+        },
+        {
+          "action": "fault",
+          "mode": "none",
+          "as": "host"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=\"create-submit\"]",
+          "as": "host"
+        },
+        {
+          "action": "waitFor",
+          "selector": "[data-testid=\"detail-back\"]",
+          "as": "host"
+        },
+        {
+          "action": "expectCount",
+          "selector": "[data-testid=\"slot\"]",
+          "count": 3,
+          "as": "host"
+        },
+        {
+          "action": "reload",
+          "as": "host"
+        },
+        {
+          "action": "waitFor",
+          "selector": "[data-testid=\"new-potluck\"]",
+          "as": "host"
+        },
+        {
+          "action": "expectCount",
+          "selector": "[data-testid=\"event-card\"]",
+          "count": 1,
+          "as": "host"
+        },
+        {
+          "action": "expectText",
+          "selector": "[data-testid=\"event-card\"]",
+          "text": "Harvest Supper",
+          "as": "host"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=\"event-card\"]",
+          "as": "host"
+        },
+        {
+          "action": "waitFor",
+          "selector": "[data-testid=\"detail-back\"]",
+          "as": "host"
+        },
+        {
+          "action": "expectCount",
+          "selector": "[data-testid=\"slot\"]",
+          "count": 3,
+          "as": "host"
+        }
+      ]
+    }
+  ]
+}
