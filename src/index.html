@@ -333,7 +333,9 @@ async function refresh() {
     loadedOnce = true; loadFailed = false;
     render();
   } catch (e) {
-    if (loadedOnce) error = e.message; else loadFailed = true;
+    // The hub's text is never for the screen.
+    console.error("[potluck] refresh failed:", e);
+    if (loadedOnce) error = "Couldn’t refresh the gatherings — try again."; else loadFailed = true;
     render();
   }
 }
