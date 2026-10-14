@@ -84,15 +84,7 @@
   },
   "row_policies": {
     "events": {
-      "kind": "adult_writable",
-      "retain_days": {
-        "default": 730,
-        "timestamp_column": "date",
-        "override_key": "potluck_history",
-        "dependent_tables": [
-          { "table": "guest_signups", "foreign_key": "event_id" }
-        ]
-      }
+      "kind": "adult_writable"
     },
     "slots": {
       "kind": "adult_writable"
@@ -105,6 +97,16 @@
       "kind": "endpoint_only",
       "read": "everyone",
       "max_rows": 200
+    }
+  },
+  "retention": {
+    "events": {
+      "default": 730,
+      "timestamp_column": "date",
+      "override_key": "potluck_history",
+      "dependent_tables": [
+        { "table": "guest_signups", "foreign_key": "event_id" }
+      ]
     }
   },
   "slot_claims": {
@@ -148,9 +150,6 @@
       "kind": "sql",
       "query": "SELECT id AS id, title AS title, NULLIF(location, '') AS subtitle, date AS when_at FROM app_potluck__events WHERE date = :today AND archived = 0 LIMIT 10"
     }
-  },
-  "resource_limits": {
-    "max_db_bytes": 52428800
   },
   "icon": "🍽️",
   "ai_access": {
