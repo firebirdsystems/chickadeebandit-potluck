@@ -67,6 +67,37 @@ export function claimErrorMessage(json) {
   }
 }
 
+// ── Creating a potluck ───────────────────────────────────────────────────────
+// The event and its dish slots go to the hub as ONE batch, so a failure part-way
+// leaves nothing behind and a retry cannot make a second potluck. The hub takes
+// 25 statements a batch and 100 bound values a statement: a slot row binds 7, so
+// 14 rows share an INSERT and up to 24 such INSERTs follow the event's (336
+// slots). The form stops well short of that, at a list a person can still read.
+export const SLOT_ROWS_PER_INSERT = 14;
+export const MAX_SLOTS = 100;
+
+/** The statements that create `event` with `newSlots`, or null when there are too many slots. */
+export function potluckCreateStatements(event, newSlots) {
+  if (newSlots.length > MAX_SLOTS) return null;
+  const statements = [{
+    sql: `INSERT INTO app_potluck__events (id, title, date, location, notes, created_by_id, created_by_name, created_at, archived)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    params: [event.id, event.title, event.date, event.location, event.notes, event.created_by_id, event.created_by_name, event.created_at],
+  }];
+  for (let i = 0; i < newSlots.length; i += SLOT_ROWS_PER_INSERT) {
+    const rows = newSlots.slice(i, i + SLOT_ROWS_PER_INSERT);
+    // guest_capacity mirrors the member allowance at creation — the two ledgers
+    // are separate, so a slot offers the same number of openings to share-link
+    // guests as to members until an organizer retunes it on the slot card.
+    statements.push({
+      sql: `INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at)
+            VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+      params: rows.flatMap(s => [s.id, s.event_id, s.name, s.capacity, s.capacity, s.sort_order, s.created_at]),
+    });
+  }
+  return statements;
+}
+
 /**
  * Fields the in-app search matches against (see hub-sdk `searchMatch`).
  * Location and notes count as well as the title — a gathering is

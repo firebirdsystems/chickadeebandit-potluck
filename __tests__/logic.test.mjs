@@ -4,7 +4,52 @@ import {
   sortEventSlots, sortSlotClaims, claimedCount, eventTotals, searchableFields,
   guestSignupsForSlot, guestCount, unslottedGuestSignups,
   buildCalendarEvents, CALENDAR_EXPORT_MAX_EVENTS,
+  potluckCreateStatements, MAX_SLOTS, SLOT_ROWS_PER_INSERT,
 } from "../src/logic.js";
+
+describe("potluckCreateStatements", () => {
+  const event = {
+    id: "e1", title: "Dinner", date: "2026-11-26", location: "Home", notes: "",
+    created_by_id: "m1", created_by_name: "Alex", created_at: "2026-01-01T00:00:00.000Z",
+  };
+  const slotsOf = n => Array.from({ length: n }, (_, i) => ({
+    id: `s${i}`, event_id: "e1", name: `Dish ${i}`, capacity: (i % 3) + 1, sort_order: i, created_at: "2026-01-01T00:00:00.000Z",
+  }));
+
+  it("fits the largest potluck in one batch within the hub's limits", () => {
+    const statements = potluckCreateStatements(event, slotsOf(MAX_SLOTS));
+    expect(statements.length).toBeLessThanOrEqual(25);
+    for (const s of statements) {
+      expect(s.params.length).toBeLessThanOrEqual(100);
+      expect(s.sql.split("?").length - 1).toBe(s.params.length);
+    }
+    expect(SLOT_ROWS_PER_INSERT * 7).toBeLessThanOrEqual(100);
+    expect(24 * SLOT_ROWS_PER_INSERT).toBeGreaterThanOrEqual(MAX_SLOTS);
+  });
+
+  it("writes every slot once, in order, with guest_capacity mirroring capacity", () => {
+    const slots = slotsOf(SLOT_ROWS_PER_INSERT + 3);
+    const statements = potluckCreateStatements(event, slots);
+    expect(statements).toHaveLength(3);
+    expect(statements[0].sql).toMatch(/INSERT INTO app_potluck__events/);
+    expect(statements[0].params[0]).toBe("e1");
+    const rows = statements.slice(1).flatMap(s => {
+      expect(s.sql).toMatch(/INSERT INTO app_potluck__slots/);
+      const out = [];
+      for (let i = 0; i < s.params.length; i += 7) out.push(s.params.slice(i, i + 7));
+      return out;
+    });
+    expect(rows).toEqual(slots.map(s => [s.id, "e1", s.name, s.capacity, s.capacity, s.sort_order, s.created_at]));
+  });
+
+  it("makes only the event row when there are no slots", () => {
+    expect(potluckCreateStatements(event, [])).toHaveLength(1);
+  });
+
+  it("refuses more slots than the form allows", () => {
+    expect(potluckCreateStatements(event, slotsOf(MAX_SLOTS + 1))).toBeNull();
+  });
+});
 
 describe("fmtDate", () => {
   it("returns empty for falsy", () => expect(fmtDate("")).toBe(""));

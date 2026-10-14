@@ -163,7 +163,7 @@ import {
   memberById as memberByIdOf, sortEventSlots, sortSlotClaims,
   claimedCount as claimedCountOf, eventTotals as eventTotalsOf, searchableFields,
   guestSignupsForSlot, guestCount as guestCountOf, unslottedGuestSignups,
-  buildCalendarEvents,
+  buildCalendarEvents, potluckCreateStatements, MAX_SLOTS,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -224,10 +224,9 @@ async function dbq(sql, params = []) {
 
 // Atomic multi-statement form of /api/db — D1 runs a batch transactionally, so
 // the statements land whole or not at all. /api/db caps a batch at 25
-// statements; creating a potluck is the event row plus one row per dish slot,
-// so the form stops at MAX_SLOTS and the create is always ONE batch.
-const MAX_BATCH = 25;
-const MAX_SLOTS = MAX_BATCH - 1;
+// statements; creating a potluck packs its dish slots several to an INSERT
+// (logic.js potluckCreateStatements), and the form stops at MAX_SLOTS so the
+// create is always ONE batch.
 
 async function dbBatch(statements) {
   if (!DB || !statements.length) return [];
@@ -360,13 +359,14 @@ async function createEvent(form) {
     .map((s, index) => ({ ...s, name: s.name.trim(), capacity: Math.max(1, Number(s.capacity) || 1), sort_order: index }))
     .filter(s => s.name);
   if (!title || !date || cleanSlots.length === 0) return showError("Add a title, date, and at least one dish slot.");
-  if (cleanSlots.length > MAX_SLOTS) return showError(`A potluck can have up to ${MAX_SLOTS} dish slots.`);
 
   const event = {
     id: uid("potluck"), title, date, location, notes,
     created_by_id: currentMember.id, created_by_name: currentMember.name, created_at: nowIso(), archived: 0,
   };
   const eventSlotsToInsert = cleanSlots.map(s => ({ ...s, id: uid("slot"), event_id: event.id, guest_capacity: s.capacity, created_at: nowIso() }));
+  const statements = potluckCreateStatements(event, eventSlotsToInsert);
+  if (!statements) return showError(`A potluck can have up to ${MAX_SLOTS} dish slots.`);
 
   creating = true;
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -375,22 +375,7 @@ async function createEvent(form) {
     if (DB) {
       // One batch: the event and every slot land together or not at all, so a
       // refused create leaves nothing behind for the retry to duplicate.
-      await dbBatch([
-        {
-          sql: `INSERT INTO app_potluck__events (id, title, date, location, notes, created_by_id, created_by_name, created_at, archived)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-          params: [event.id, event.title, event.date, event.location, event.notes, event.created_by_id, event.created_by_name, event.created_at],
-        },
-        ...eventSlotsToInsert.map(s => ({
-          // guest_capacity mirrors the member allowance at creation — the two
-          // ledgers are separate, so a slot offers the same number of openings
-          // to share-link guests as to members until an organizer retunes it
-          // on the slot card.
-          sql: `INSERT INTO app_potluck__slots (id, event_id, name, capacity, guest_capacity, sort_order, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          params: [s.id, s.event_id, s.name, s.capacity, s.capacity, s.sort_order, s.created_at],
-        })),
-      ]);
+      await dbBatch(statements);
     }
     events = [...events, event].sort((a, b) => a.date.localeCompare(b.date));
     slots = [...slots, ...eventSlotsToInsert];
