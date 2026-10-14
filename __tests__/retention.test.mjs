@@ -17,7 +17,7 @@ const init = readFileSync(join(__dirname, "../migrations/001_init.sql"), "utf-8"
 const retentionIdx = readFileSync(join(__dirname, "../migrations/003_retention_index.sql"), "utf-8");
 
 describe("events retention", () => {
-  const retain = manifest.row_policies.events.retain_days;
+  const retain = manifest.retention.events;
 
   it("expires events 730 days after the event date", () => {
     expect(retain.default).toBe(730);
