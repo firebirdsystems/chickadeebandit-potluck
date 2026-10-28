@@ -5,7 +5,7 @@
 -- The hub's share-submit path sets only id, event_id (fk), and the declared
 -- plaintext fields; created_at defaults so the hub needn't set it.
 CREATE TABLE IF NOT EXISTS app_potluck__guest_signups (
-  id          TEXT    PRIMARY KEY,
+  id          TEXT    NOT NULL PRIMARY KEY,
   event_id    TEXT    NOT NULL,
   guest_name  TEXT    NOT NULL DEFAULT '',
   dish        TEXT    NOT NULL DEFAULT '',

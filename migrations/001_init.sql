@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS app_potluck__events (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   title TEXT NOT NULL,
   date TEXT NOT NULL,
   location TEXT DEFAULT '',
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS app_potluck__events (
 );
 
 CREATE TABLE IF NOT EXISTS app_potluck__slots (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   event_id TEXT NOT NULL,
   name TEXT NOT NULL,
   capacity INTEGER NOT NULL DEFAULT 1 CHECK (capacity > 0),
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS app_potluck__slots (
 -- below, so no event_id / member_name here: derive the event from the slot
 -- and the member name from family.members at render time.
 CREATE TABLE IF NOT EXISTS app_potluck__claims (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   slot_id TEXT NOT NULL,
   member_id TEXT NOT NULL,
   note TEXT DEFAULT '',
